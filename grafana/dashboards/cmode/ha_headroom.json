@@ -1,0 +1,2048 @@
+{
+ "__inputs": [
+  {
+   "name": "DS_PROMETHEUS",
+   "label": "Prometheus",
+   "description": "",
+   "type": "datasource",
+   "pluginId": "prometheus",
+   "pluginName": "Prometheus"
+  }
+ ],
+ "__requires": [
+  {
+   "type": "grafana",
+   "id": "grafana",
+   "name": "Grafana",
+   "version": "8.1.8"
+  },
+  {
+   "type": "datasource",
+   "id": "prometheus",
+   "name": "Prometheus",
+   "version": "1.0.0"
+  },
+  {
+   "type": "panel",
+   "id": "timeseries",
+   "name": "Time series",
+   "version": ""
+  },
+  {
+   "type": "panel",
+   "id": "stat",
+   "name": "Stat",
+   "version": ""
+  },
+  {
+   "type": "panel",
+   "id": "text",
+   "name": "Text",
+   "version": ""
+  }
+ ],
+ "annotations": {
+  "list": [
+   {
+    "builtIn": 1,
+    "datasource": "-- Grafana --",
+    "enable": true,
+    "hide": true,
+    "iconColor": "rgba(0, 211, 255, 1)",
+    "name": "Annotations & Alerts",
+    "type": "dashboard"
+   }
+  ]
+ },
+ "description": "2-node AFF HA takeover headroom: CPU PCU + Ethernet/ifgrp/FC survivor util. Not stock ONTAP: Headroom (no aggregate).",
+ "editable": true,
+ "gnetId": null,
+ "graphTooltip": 1,
+ "id": null,
+ "iteration": 1,
+ "links": [
+  {
+   "asDropdown": true,
+   "icon": "external link",
+   "includeVars": true,
+   "keepTime": true,
+   "tags": [
+    "cdot"
+   ],
+   "targetBlank": false,
+   "title": "Related Dashboards",
+   "type": "dashboards",
+   "url": ""
+  }
+ ],
+ "panels": [
+  {
+   "collapsed": false,
+   "datasource": "${DS_PROMETHEUS}",
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 0
+   },
+   "id": 1,
+   "panels": [],
+   "title": "Overall HA headroom",
+   "type": "row"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Worst of CPU risk and port risk. 0 green / 1 yellow / 2 red. Uses 95th percentile over $Window. CPU uses PCU when min confidence \u2265 2, else sum of node_cpu_busy.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "text": "OK \u2014 takeover headroom",
+         "color": "green"
+        }
+       }
+      },
+      {
+       "type": "range",
+       "options": {
+        "from": 0.5,
+        "to": 1.5,
+        "result": {
+         "text": "Latency risk",
+         "color": "yellow"
+        }
+       }
+      },
+      {
+       "type": "range",
+       "options": {
+        "from": 1.5,
+        "to": 9,
+        "result": {
+         "text": "Service interruption risk",
+         "color": "red"
+        }
+       }
+      }
+     ],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 1
+       },
+       {
+        "color": "red",
+        "value": 2
+       }
+      ]
+     },
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 1
+   },
+   "id": 2,
+   "options": {
+    "colorMode": "background",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "pluginVersion": "8.1.8",
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "max by (cluster) (((\n  ((min by (cluster) (headroom_cpu_optimal_point_confidence_factor{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"})) >= bool 2)\n  *\n  clamp_max(\n    (((quantile_over_time(0.95, (sum by (cluster) (\n  100 *\n    headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n    /\n    clamp_min(headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}, 1e-3)\n))[$Window:])) >= bool 160) + ((quantile_over_time(0.95, (sum by (cluster) (\n  100 *\n    headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n    /\n    clamp_min(headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}, 1e-3)\n))[$Window:])) >= bool 200)),\n    2\n  )\n)\n+\n(\n  ((min by (cluster) (headroom_cpu_optimal_point_confidence_factor{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"})) < bool 2)\n  *\n  clamp_max(\n    (((quantile_over_time(0.95, (sum by (cluster) (node_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}))[$Window:])) >= bool 70) + ((quantile_over_time(0.95, (sum by (cluster) (node_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}))[$Window:])) >= bool 85)),\n    2\n  )\n)) or (clamp_max(\n  ((max by (cluster) (\n  (quantile_over_time(0.95, (max by (cluster) (sum by (cluster, nic) (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"}) * 100))[$Window:]))\n  or (quantile_over_time(0.95, (max by (cluster) (sum by (cluster, ifgroup) ((\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100)))[$Window:]))\n  or (quantile_over_time(0.95, (max by (cluster) (sum by (cluster, port) (fcp_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}) * 100))[$Window:]))\n)) >= bool 70) + ((max by (cluster) (\n  (quantile_over_time(0.95, (max by (cluster) (sum by (cluster, nic) (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"}) * 100))[$Window:]))\n  or (quantile_over_time(0.95, (max by (cluster) (sum by (cluster, ifgroup) ((\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100)))[$Window:]))\n  or (quantile_over_time(0.95, (max by (cluster) (sum by (cluster, port) (fcp_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}) * 100))[$Window:]))\n)) >= bool 85),\n  2\n)))",
+     "interval": "",
+     "legendFormat": "{{cluster}}",
+     "refId": "A",
+     "instant": true
+    }
+   ],
+   "title": "Overall HA headroom",
+   "type": "stat"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Sum of per-node performance capacity used. 200% \u2248 survivor at the latency knee (AIUM HA pair over-utilized).",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 160
+       },
+       {
+        "color": "red",
+        "value": 200
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 8,
+    "y": 1
+   },
+   "id": 3,
+   "options": {
+    "colorMode": "background",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "pluginVersion": "8.1.8",
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "quantile_over_time(0.95, (sum by (cluster) (\n  100 *\n    headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n    /\n    clamp_min(headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}, 1e-3)\n))[$Window:])",
+     "interval": "",
+     "legendFormat": "{{cluster}}",
+     "refId": "A",
+     "instant": true
+    }
+   ],
+   "title": "Combined PCU (95th)",
+   "type": "stat"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Sum of node_cpu_busy (hottest CPU domain). Fallback when headroom confidence is low.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 70
+       },
+       {
+        "color": "red",
+        "value": 85
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 12,
+    "y": 1
+   },
+   "id": 4,
+   "options": {
+    "colorMode": "background",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "pluginVersion": "8.1.8",
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "quantile_over_time(0.95, (sum by (cluster) (node_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}))[$Window:])",
+     "interval": "",
+     "legendFormat": "{{cluster}}",
+     "refId": "A",
+     "instant": true
+    }
+   ],
+   "title": "Sum CPU busy (95th)",
+   "type": "stat"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 1
+   },
+   "id": 5,
+   "options": {
+    "content": "**How to read this dashboard**\n\nScore is **takeover on the surviving node**, not current per-node health. Overall = worst of CPU and ports (95th percentile over **$Window**).\n\n- **Green** \u2014 takeover should not cause a problem\n- **Yellow** \u2014 risk of higher latency; avoid planned failover at peak\n- **Red** \u2014 risk of service interruption / unacceptable latency\n\nCPU uses combined **performance capacity used** (PCU = current / optimal \u00d7 100, summed across the HA pair) when headroom confidence \u2265 2; otherwise the sum of `node_cpu_busy`. Ports sum util of the same ifgrp/NIC/FC port **name** on both nodes. Cluster/mgmt NICs matching **ExcludePorts** are ignored.\n\n**Caveats:** summing CPU is a proxy (HA overhead still exists). SAN multipath can make FC sums an **upper bound**. This is not AIUM estimated ms/op after takeover. Aggregate/disk headroom is omitted (AFF).",
+    "mode": "markdown"
+   },
+   "title": "Notes",
+   "type": "text"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "0 unknown, 1 low (do not trust PCU), 2 medium, 3 high.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 2
+       },
+       {
+        "color": "green",
+        "value": 3
+       }
+      ]
+     },
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 8,
+    "y": 5
+   },
+   "id": 6,
+   "options": {
+    "colorMode": "background",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "pluginVersion": "8.1.8",
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "min by (cluster) (headroom_cpu_optimal_point_confidence_factor{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"})",
+     "interval": "",
+     "legendFormat": "{{cluster}}",
+     "refId": "A",
+     "instant": true
+    }
+   ],
+   "title": "Headroom confidence (min)",
+   "type": "stat"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Max estimated survivor util: sum of same-named NIC / ifgrp / FC port across both nodes. nic_util and fcp_util are 0\u20131 in Harvest.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 70
+       },
+       {
+        "color": "red",
+        "value": 85
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 12,
+    "y": 5
+   },
+   "id": 7,
+   "options": {
+    "colorMode": "background",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "pluginVersion": "8.1.8",
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "quantile_over_time(0.95, (max by (cluster) (sum by (cluster, nic) (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"}) * 100))[$Window:])",
+     "interval": "",
+     "legendFormat": "NIC {{cluster}}",
+     "refId": "A",
+     "instant": true
+    },
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "quantile_over_time(0.95, (max by (cluster) (sum by (cluster, ifgroup) ((\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100)))[$Window:])",
+     "interval": "",
+     "legendFormat": "ifgrp {{cluster}}",
+     "refId": "B",
+     "instant": true
+    },
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "quantile_over_time(0.95, (max by (cluster) (sum by (cluster, port) (fcp_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}) * 100))[$Window:])",
+     "interval": "",
+     "legendFormat": "FC {{cluster}}",
+     "refId": "C",
+     "instant": true
+    }
+   ],
+   "title": "Hottest survivor port (95th)",
+   "type": "stat"
+  },
+  {
+   "collapsed": false,
+   "datasource": "${DS_PROMETHEUS}",
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 9
+   },
+   "id": 8,
+   "panels": [],
+   "title": "CPU performance capacity",
+   "type": "row"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Per-node performance capacity used = 100 \u00d7 current_utilization / optimal_point_utilization.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "off"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 10
+   },
+   "id": 9,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "100 *\n  headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n  /\n  clamp_min(headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}, 1e-3)",
+     "interval": "",
+     "legendFormat": "{{node}}",
+     "refId": "A"
+    }
+   ],
+   "title": "PCU per node",
+   "type": "timeseries"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Green < 160, yellow 160\u2013200, red > 200 (AIUM pair over-utilized at 200%).",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "line+area"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 160
+       },
+       {
+        "color": "red",
+        "value": 200
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 10
+   },
+   "id": 10,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "sum by (cluster) (\n  100 *\n    headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n    /\n    clamp_min(headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}, 1e-3)\n)",
+     "interval": "",
+     "legendFormat": "{{cluster}}",
+     "refId": "A"
+    }
+   ],
+   "title": "Combined PCU (takeover estimate)",
+   "type": "timeseries"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Current average CPU vs ONTAP optimal-point utilization (latency knee).",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "off"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 18
+   },
+   "id": 11,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}",
+     "interval": "",
+     "legendFormat": "current {{node}}",
+     "refId": "A"
+    },
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}",
+     "interval": "",
+     "legendFormat": "optimal {{node}}",
+     "refId": "B"
+    }
+   ],
+   "title": "CPU utilization vs optimal point",
+   "type": "timeseries"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Negative means current ops already exceed the optimal-point ops.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "off"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "iops"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 18
+   },
+   "id": 12,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "headroom_cpu_optimal_point_ops{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} - headroom_cpu_current_ops{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}",
+     "interval": "",
+     "legendFormat": "{{node}}",
+     "refId": "A"
+    }
+   ],
+   "title": "Available CPU ops (optimal \u2212 current)",
+   "type": "timeseries"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "1 = seed/low \u2014 ignore PCU and use CPU busy. 2\u20133 = usable optimal point.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "off"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 6,
+    "w": 24,
+    "x": 0,
+    "y": 26
+   },
+   "id": 13,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "headroom_cpu_optimal_point_confidence_factor{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}",
+     "interval": "",
+     "legendFormat": "{{node}}",
+     "refId": "A"
+    }
+   ],
+   "title": "Headroom confidence factor",
+   "type": "timeseries"
+  },
+  {
+   "collapsed": false,
+   "datasource": "${DS_PROMETHEUS}",
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 32
+   },
+   "id": 14,
+   "panels": [],
+   "title": "CPU busy (hottest domain)",
+   "type": "row"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "node_cpu_busy is limited by the hottest CPU domain or remaining idle, whichever binds first.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "line+area"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 70
+       },
+       {
+        "color": "red",
+        "value": 85
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 33
+   },
+   "id": 15,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "node_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}",
+     "interval": "",
+     "legendFormat": "{{node}}",
+     "refId": "A"
+    },
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "sum by (cluster) (node_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"})",
+     "interval": "",
+     "legendFormat": "sum (takeover est.)",
+     "refId": "B"
+    }
+   ],
+   "title": "node_cpu_busy per node and HA sum",
+   "type": "timeseries"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Average across cores \u2014 can look fine while one domain is saturated. Prefer node_cpu_busy for the traffic light.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "off"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 33
+   },
+   "id": 16,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "node_avg_processor_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}",
+     "interval": "",
+     "legendFormat": "{{node}}",
+     "refId": "A"
+    },
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "sum by (cluster) (node_avg_processor_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"})",
+     "interval": "",
+     "legendFormat": "sum",
+     "refId": "B"
+    }
+   ],
+   "title": "Average processor busy (per node and sum)",
+   "type": "timeseries"
+  },
+  {
+   "collapsed": false,
+   "datasource": "${DS_PROMETHEUS}",
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 41
+   },
+   "id": 17,
+   "panels": [],
+   "title": "Ethernet / ifgrp (exclude cluster and mgmt)",
+   "type": "row"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Harvest nic_util_percent is 0\u20131. ExcludePorts default e0a|e0b|e0M.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "off"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 42
+   },
+   "id": 18,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"} * 100",
+     "interval": "",
+     "legendFormat": "{{node}} {{nic}}",
+     "refId": "A"
+    }
+   ],
+   "title": "NIC util % (cluster/mgmt excluded)",
+   "type": "timeseries"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Same port name on both HA nodes added together. Green < 70, yellow 70\u201385, red > 85.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "line+area"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 70
+       },
+       {
+        "color": "red",
+        "value": 85
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 42
+   },
+   "id": 19,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "sum by (cluster, nic) (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"}) * 100",
+     "interval": "",
+     "legendFormat": "{{nic}}",
+     "refId": "A"
+    }
+   ],
+   "title": "Estimated survivor NIC util (sum by port name)",
+   "type": "timeseries"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Preferred NAS model: LIFs fail over onto the partner ifgrp.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "off"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 50
+   },
+   "id": 20,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "(\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100",
+     "interval": "",
+     "legendFormat": "{{node}} {{ifgroup}}",
+     "refId": "A"
+    }
+   ],
+   "title": "ifgrp max(rx,tx) % per node",
+   "type": "timeseries"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Equal-speed ifgrps named the same on both nodes: will the remaining LAG exceed 100%?",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "line+area"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 70
+       },
+       {
+        "color": "red",
+        "value": 85
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 50
+   },
+   "id": 21,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "sum by (cluster, ifgroup) ((\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100)",
+     "interval": "",
+     "legendFormat": "{{ifgroup}}",
+     "refId": "A"
+    }
+   ],
+   "title": "Estimated survivor ifgrp util (sum by ifgroup)",
+   "type": "timeseries"
+  },
+  {
+   "collapsed": false,
+   "datasource": "${DS_PROMETHEUS}",
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 58
+   },
+   "id": 22,
+   "panels": [],
+   "title": "SAN (FC) \u2014 upper bound",
+   "type": "row"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Harvest fcp_util_percent is 0\u20131. Empty if the cluster has no FC.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "off"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 59
+   },
+   "id": 23,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "fcp_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} * 100",
+     "interval": "",
+     "legendFormat": "{{node}} {{port}}",
+     "refId": "A"
+    }
+   ],
+   "title": "FC port util %",
+   "type": "timeseries"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "Upper bound: hosts with multipath already send I/O to both nodes.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "line+area"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 70
+       },
+       {
+        "color": "red",
+        "value": 85
+       }
+      ]
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 59
+   },
+   "id": 24,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "sum by (cluster, port) (fcp_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}) * 100",
+     "interval": "",
+     "legendFormat": "{{port}}",
+     "refId": "A"
+    }
+   ],
+   "title": "Estimated survivor FC util (sum by port name)",
+   "type": "timeseries"
+  },
+  {
+   "collapsed": false,
+   "datasource": "${DS_PROMETHEUS}",
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 67
+   },
+   "id": 25,
+   "panels": [],
+   "title": "Context \u2014 current latency (not in traffic light)",
+   "type": "row"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "If latency is already high, do not plan a takeover even if headroom is green.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "off"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "\u00b5s"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 68
+   },
+   "id": 26,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "node_nfs_latency{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}",
+     "interval": "",
+     "legendFormat": "{{node}}",
+     "refId": "A"
+    }
+   ],
+   "title": "NFS latency",
+   "type": "timeseries"
+  },
+  {
+   "datasource": "${DS_PROMETHEUS}",
+   "description": "",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "",
+      "axisPlacement": "auto",
+      "barAlignment": 0,
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "gradientMode": "none",
+      "hideFrom": {
+       "legend": false,
+       "tooltip": false,
+       "viz": false
+      },
+      "lineInterpolation": "linear",
+      "lineWidth": 1,
+      "pointSize": 5,
+      "scaleDistribution": {
+       "type": "linear"
+      },
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "group": "A",
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "off"
+      }
+     },
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "\u00b5s"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 68
+   },
+   "id": 27,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "fcp_avg_read_latency{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}",
+     "interval": "",
+     "legendFormat": "read {{node}} {{port}}",
+     "refId": "A"
+    },
+    {
+     "datasource": "${DS_PROMETHEUS}",
+     "exemplar": false,
+     "expr": "fcp_avg_write_latency{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}",
+     "interval": "",
+     "legendFormat": "write {{node}} {{port}}",
+     "refId": "B"
+    }
+   ],
+   "title": "FCP read/write latency",
+   "type": "timeseries"
+  }
+ ],
+ "refresh": "1m",
+ "schemaVersion": 30,
+ "style": "dark",
+ "tags": [
+  "harvest",
+  "ontap",
+  "cdot",
+  "ha",
+  "headroom"
+ ],
+ "templating": {
+  "list": [
+   {
+    "current": {
+     "selected": false,
+     "text": "Prometheus",
+     "value": "Prometheus"
+    },
+    "hide": 2,
+    "includeAll": false,
+    "label": "Data Source",
+    "multi": false,
+    "name": "DS_PROMETHEUS",
+    "options": [],
+    "query": "prometheus",
+    "refresh": 1,
+    "regex": "",
+    "skipUrlSync": false,
+    "type": "datasource"
+   },
+   {
+    "allValue": ".*",
+    "current": {},
+    "datasource": "${DS_PROMETHEUS}",
+    "definition": "label_values(cluster_new_status{system_type!=\"7mode\"}, datacenter)",
+    "description": null,
+    "error": null,
+    "hide": 0,
+    "includeAll": true,
+    "label": null,
+    "multi": true,
+    "name": "Datacenter",
+    "options": [],
+    "query": {
+     "query": "label_values(cluster_new_status{system_type!=\"7mode\"}, datacenter)",
+     "refId": "StandardVariableQuery"
+    },
+    "refresh": 2,
+    "regex": "",
+    "skipUrlSync": false,
+    "sort": 7,
+    "type": "query"
+   },
+   {
+    "allValue": ".*",
+    "current": {},
+    "datasource": "${DS_PROMETHEUS}",
+    "definition": "label_values(cluster_new_status{system_type!=\"7mode\",datacenter=~\"$Datacenter\"}, cluster)",
+    "description": null,
+    "error": null,
+    "hide": 0,
+    "includeAll": true,
+    "label": null,
+    "multi": true,
+    "name": "Cluster",
+    "options": [],
+    "query": {
+     "query": "label_values(cluster_new_status{system_type!=\"7mode\",datacenter=~\"$Datacenter\"}, cluster)",
+     "refId": "StandardVariableQuery"
+    },
+    "refresh": 2,
+    "regex": "",
+    "skipUrlSync": false,
+    "sort": 7,
+    "type": "query"
+   },
+   {
+    "current": {
+     "selected": true,
+     "text": "30m",
+     "value": "30m"
+    },
+    "hide": 0,
+    "includeAll": false,
+    "label": "Percentile window",
+    "multi": false,
+    "name": "Window",
+    "options": [
+     {
+      "selected": false,
+      "text": "15m",
+      "value": "15m"
+     },
+     {
+      "selected": true,
+      "text": "30m",
+      "value": "30m"
+     }
+    ],
+    "query": "15m,30m",
+    "skipUrlSync": false,
+    "type": "custom"
+   },
+   {
+    "current": {
+     "selected": true,
+     "text": "e0a|e0b|e0M",
+     "value": "e0a|e0b|e0M"
+    },
+    "hide": 0,
+    "includeAll": false,
+    "label": "Exclude NIC regex",
+    "multi": false,
+    "name": "ExcludePorts",
+    "options": [
+     {
+      "selected": true,
+      "text": "e0a|e0b|e0M",
+      "value": "e0a|e0b|e0M"
+     },
+     {
+      "selected": false,
+      "text": "e0a|e0b|e0c|e0d|e0M",
+      "value": "e0a|e0b|e0c|e0d|e0M"
+     }
+    ],
+    "query": "e0a|e0b|e0M,e0a|e0b|e0c|e0d|e0M",
+    "skipUrlSync": false,
+    "type": "custom"
+   }
+  ]
+ },
+ "time": {
+  "from": "now-3h",
+  "to": "now"
+ },
+ "timepicker": {},
+ "timezone": "",
+ "title": "ONTAP: HA Headroom",
+ "uid": "cdot-ha-headroom",
+ "version": 1
+}
