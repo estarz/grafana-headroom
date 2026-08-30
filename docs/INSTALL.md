@@ -3,7 +3,7 @@
 Step-by-step from "I have a running ONTAP cluster" to "the dashboard is showing data."
 
 If Harvest, Prometheus, and Grafana are already up and collecting metrics from your cluster,
-jump straight to [Step 4](#step-4-verify-the-metrics-are-present).
+jump straight to [Step 4](#step-4--verify-the-metrics-are-present).
 
 ---
 
@@ -20,7 +20,7 @@ jump straight to [Step 4](#step-4-verify-the-metrics-are-present).
 
 ## Step 1 — Install Harvest
 
-If Harvest is already installed and running, skip to [Step 2](#step-2-create-a-poller-for-your-cluster).
+If Harvest is already installed and running, skip to [Step 2](#step-2--create-a-poller-for-your-cluster).
 
 Official guide: [https://netapp.github.io/harvest/latest/install/native/](https://netapp.github.io/harvest/latest/install/native/)
 

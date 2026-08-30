@@ -38,6 +38,7 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the model, the thresholds and the cavea
 | Requirement | Why |
 | --- | --- |
 | Harvest **24.05 or newer** | Earlier releases do not export the `ha_partner` label |
+| Harvest **25.11 or newer** recommended | Adds `allow_partial_aggregation`, without which `node_cpu_busy` blanks for *every* node while any one node is down — see [docs/METRICS.md](docs/METRICS.md#behaviour-during-a-takeover) |
 | Harvest **Rest** collector enabled | Supplies `node_labels` (HA partner, model) and `net_port_status` (port role, ipspace) |
 | Harvest **RestPerf** or **ZapiPerf** enabled | Supplies `headroom_cpu_*`, `node_cpu_busy`, `nic_util_percent`, `nic_ifgrp_*` |
 | Prometheus or VictoriaMetrics | Both are PromQL-compatible; no recording rules needed |

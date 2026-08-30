@@ -105,6 +105,21 @@ green. 80% on a single node is not "fine" — it is a takeover problem.
 The dashboard switches models automatically and shows the confidence factor so you can see
 which one is in play.
 
+### One awkward property of the fallback
+
+`node_cpu_busy` comes from `system:node`, which ONTAP treats as an **aggregated** counter
+table. When any node in the cluster is unreachable, ONTAP marks *every* row incomplete —
+including the healthy nodes' — and consumers that respect that flag drop the whole object.
+Harvest 25.11 added `allow_partial_aggregation: true` to work around it.
+
+`headroom_cpu` is not an aggregated table and does not have this problem.
+
+So the model most likely to be driving your traffic light day to day is also the one that
+degrades worst at the moment a node actually fails. This does not undermine the score in
+normal operation — it is a caveat about what you will see *during* an outage, not before one.
+Run Harvest 25.11 or newer if you can. Details and the exact failure modes are in
+[METRICS.md](METRICS.md#behaviour-during-a-takeover).
+
 ## Network: Ethernet data ports
 
 NAS LIFs fail over onto the partner's ports, so the survivor's ports carry both nodes'
@@ -205,6 +220,11 @@ To make a change permanent, edit the defaults in `generate_ha_headroom.py` and r
 - **Unmodelled resources.** Harvest has no NVRAM, HA-interconnect, or memory-pressure
   counter. On A70/A90 the cluster interconnect and HA traffic share the same physical 100GbE
   ports, so HA interconnect load is genuinely invisible here.
+- **The scored panels blank out during an actual takeover.** The pair sum needs a series from
+  both nodes, so while one is down there is nothing to sum. On Harvest older than 25.11,
+  `node_cpu_busy` may also blank for the *surviving* node because of ONTAP's partial-aggregation
+  flag. This dashboard answers "what if a node goes down", not "what is happening now that one
+  has" — but do not expect it to be your view during an incident.
 - **Not AIQUM.** This does not reproduce AIQUM's estimated ms/op after takeover; that model
   is proprietary.
 - **Aggregate and disk headroom are omitted on purpose.** The scope is all-flash, where they

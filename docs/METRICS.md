@@ -62,6 +62,20 @@ Both `node.yaml` and `netport.yaml` are enabled by default in `conf/rest/default
 - **`health_ha_alerts` looks like an HA topology source but is not.** Harvest's Health plugin
   filters on `takeover_possible != true`, so the series exists *only when HA is already
   broken*. On a healthy cluster it is empty.
+- **`system:node` is an *aggregated* counter table, and goes blank cluster-wide when any node
+  is down.** ONTAP attaches an `aggregation` object with a `complete` flag to these tables, and
+  when a request to any node fails it sets `complete = false` for **all** rows — including the
+  healthy nodes'. Harvest issues [#3731](https://github.com/NetApp/harvest/issues/3731) and
+  [#2769](https://github.com/NetApp/harvest/issues/2769) document this; a maintainer called
+  ONTAP flagging the *up* nodes incomplete "the part that seems like a bug". Consumers that
+  respect the flag drop the whole object. Harvest 25.11 added `allow_partial_aggregation: true`
+  to `system_node.yaml` so node-scoped objects can still emit. This affects `node_cpu_busy`,
+  `node_avg_processor_busy`, `node_total_latency` and the `node_*_ops` counters. See
+  [the takeover section](#behaviour-during-a-takeover) below.
+- **`headroom_cpu` is *not* an aggregated table**, so it is immune to the problem above. ONTAP's
+  [counter mapping for `headroom_cpu`](https://docs.netapp.com/us-en/ontap-pcmap/headroom_cpu.html)
+  lists its aggregation type as not applicable, with row IDs keyed on node UUID. This is a real
+  argument for preferring the PCU model over the CPU busy fallback where confidence allows.
 
 ### What Harvest does not provide
 
@@ -157,6 +171,27 @@ sum by (datacenter, cluster) (node_cpu_busy{datacenter=~"$Datacenter",cluster=~"
 
 Do **not** use that form on a cluster with more than two nodes — it sums unrelated HA pairs
 into one meaningless figure. Upgrade Harvest instead.
+
+### Behaviour during a takeover
+
+The pair sum needs a matching series from **both** nodes, so while a node is actually down the
+pair series does not exist and the scored panels read "No data".
+
+That is defensible — "could the survivor absorb its partner?" is moot once it already has — but
+it is worth knowing rather than discovering during an incident. Three separate things are going
+on, and they fail differently:
+
+| Source | Behaviour while a node is down |
+| --- | --- |
+| `node_labels` (config collector) | **Survives.** `api/cluster/nodes` keeps listing the node, with state `taken_over` or `waiting_for_giveback`, reported by its HA partner. So `ha_partner` and the pair table stay populated. |
+| `node_cpu_busy` and other `system:node` counters | **May blank for every node in the cluster**, not just the down one, because of the partial-aggregation flag described above. Harvest 25.11+ with `allow_partial_aggregation: true` keeps the survivor reporting. |
+| `headroom_cpu_*` | Not an aggregated table, so the survivor is unaffected. Whether the down node's row disappears or persists stale is **undocumented**. |
+
+The practical consequence: on Harvest older than 25.11 the CPU busy fallback is the model most
+likely to be in use *and* the one that degrades worst during an outage. Prefer 25.11 or newer.
+
+The undocumented parts are cheap to measure — [LAB-PLAN.md](../LAB-PLAN.md) TC-11 through TC-13
+walk through capturing this against a real cluster.
 
 ## PromQL patterns used, and why
 

@@ -52,6 +52,14 @@ expected on lightly loaded or recently rebooted nodes. The dashboard falls back 
 `node_cpu_busy` automatically via `(PCU_index and confidence_ok) or busy_index`. Missing
 `headroom_cpu_*` also triggers the fallback — do not break this `or`.
 
+**`system:node` blanks cluster-wide when a node is down.** ONTAP treats it as an aggregated
+counter table and marks all rows incomplete — including healthy nodes' — if any node is
+unreachable (Harvest [#3731](https://github.com/NetApp/harvest/issues/3731),
+[#2769](https://github.com/NetApp/harvest/issues/2769)). Harvest 25.11 added
+`allow_partial_aggregation: true` as a workaround. `headroom_cpu` is not aggregated and is
+unaffected. So `node_cpu_busy` — the everyday fallback model — is also the one that degrades
+worst during a real outage. Recommend Harvest 25.11+.
+
 ## Running the tests
 
 ```bash
