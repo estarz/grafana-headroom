@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Generate grafana/dashboards/cmode/ha_headroom.json (Harvest-style Grafana 8+ import)."""
+"""Generate grafana/dashboards/cmode/ha_headroom.json.
+
+Produces a Harvest-style Grafana 8 import file (schemaVersion 30) that scores
+ONTAP takeover risk per HA pair and rolls it up to the cluster as the worst pair.
+
+See ../docs/METRICS.md for the PromQL shapes this emits and why.
+"""
 
 from __future__ import annotations
 
@@ -7,94 +13,257 @@ import json
 from pathlib import Path
 
 DS = "${DS_PROMETHEUS}"
-SEL = 'datacenter=~"$Datacenter",cluster=~"$Cluster"'
-NIC_SEL = f'{SEL},nic!~"$ExcludePorts"'
-IFGRP_SEL = f'{SEL},ports!=""'
 
-PCU = f"""sum by (cluster) (
-  100 *
-    headroom_cpu_current_utilization{{{SEL}}}
-    /
-    clamp_min(headroom_cpu_optimal_point_utilization{{{SEL}}}, 1e-3)
+# Harvest label set shared by every query.
+SEL = 'datacenter=~"$Datacenter",cluster=~"$Cluster"'
+
+# The customer running this dashboard is NAS + iSCSI/NVMe-TCP only. Harvest has no
+# per-port iSCSI or NVMe-TCP utilization counter, so Ethernet ports carry that
+# traffic in the model. Flip to True to add FC target-port panels and fold
+# fcp_util_percent into the network score.
+INCLUDE_FC = False
+
+# Aggregation granularities. A takeover is always within an HA pair, so the pair is
+# the unit of truth and the cluster is the worst of its pairs.
+PAIR_KEYS = ("datacenter", "cluster", "survivor", "victim")
+CLUSTER_KEYS = ("datacenter", "cluster")
+
+
+def keys(k) -> str:
+    return ", ".join(k)
+
+
+# --------------------------------------------------------------------------------
+# HA pair machinery
+#
+# Harvest exports the partner name as a label on the config-collector node object
+# (`node_labels{ha_partner="..."}`, Harvest >= 24.05). Perf metrics come from a
+# different template and lack it, so each one is joined first. There is no chassis
+# or pair-id label, so the pair is formed by matching each node against its partner
+# with node/ha_partner swapped on one side.
+# --------------------------------------------------------------------------------
+
+NODE_LABELS = f'node_labels{{{SEL},ha_partner!=""}}'
+
+
+def with_partner(expr: str) -> str:
+    """Attach the ha_partner label to a per-node expression."""
+    return (
+        f"(\n{expr}\n)\n"
+        "* on (datacenter, cluster, node) group_left (ha_partner)\n"
+        f"({NODE_LABELS} == 1)"
+    )
+
+
+def _orient(expr: str, survivor_from: str, victim_from: str) -> str:
+    return (
+        f'label_replace(\nlabel_replace(\n{expr}\n'
+        f', "survivor", "$1", "{survivor_from}", "(.*)")\n'
+        f', "victim", "$1", "{victim_from}", "(.*)")'
+    )
+
+
+def pair_sum(expr: str, extra: tuple[str, ...] = ()) -> str:
+    """Load the survivor would carry after absorbing the victim.
+
+    Input must carry datacenter, cluster and node (plus any `extra` labels that
+    identify a resource, e.g. nic). Output is keyed by survivor/victim, so a
+    2-node cluster yields two symmetric series and an N-node cluster yields one
+    series per HA pair per direction.
+    """
+    joined = with_partner(expr)
+    k = keys(list(PAIR_KEYS) + list(extra))
+    survivor_side = _orient(joined, "node", "ha_partner")
+    victim_side = _orient(joined, "ha_partner", "node")
+    return f"(\n{survivor_side}\n)\n+ on ({k})\n(\n{victim_side}\n)"
+
+
+def p95(expr: str) -> str:
+    """95th percentile over $Window so a momentary spike cannot flip the light."""
+    return f"quantile_over_time(0.95, (\n{expr}\n)[$Window:])"
+
+
+def risk_index(expr: str, yellow: str, red: str) -> str:
+    """Map a utilization value onto a continuous 0-2+ index.
+
+    1.0 is exactly the yellow line and 2.0 exactly the red line, so a single
+    Grafana threshold pair colours resources that have different native scales.
+    Above red the index keeps climbing, which shows how far past the line it is.
+    """
+    return (
+        f"clamp_max(\n(\n{expr}\n)\n/ {yellow}, 1)\n"
+        f"+ clamp_min(\n(\n(\n{expr}\n)\n- {yellow}\n)\n/ ({red} - {yellow}), 0)"
+    )
+
+
+def worst_of(parts: dict[str, str], k=PAIR_KEYS) -> str:
+    """Max across expressions that would otherwise share an identical label set.
+
+    `or` is a union, not a max: for series with equal label sets it silently
+    returns only the left side. Stamping a distinguishing label first makes the
+    union real, and `max by` then picks the worst. Absent series contribute
+    nothing instead of blanking the result.
+    """
+    tagged = [
+        f'label_replace(\n{expr}\n, "resource", "{name}", "", "")'
+        for name, expr in parts.items()
+    ]
+    body = "\nor\n".join(tagged)
+    return f"max by ({keys(k)}) (\n{body}\n)"
+
+
+# --------------------------------------------------------------------------------
+# Per-node inputs
+# --------------------------------------------------------------------------------
+
+# headroom_cpu_*_utilization are 0-100. Dividing by a `> 0` filter drops nodes whose
+# optimal point is unpopulated; clamp_min() would instead turn 0 into a fake red.
+PCU_NODE = f"""100
+* headroom_cpu_current_utilization{{{SEL}}}
+/ (headroom_cpu_optimal_point_utilization{{{SEL}}} > 0)"""
+
+CONF_OK_NODE = (
+    f"headroom_cpu_optimal_point_confidence_factor{{{SEL}}} >= bool $ConfMin"
+)
+
+BUSY_NODE = f"node_cpu_busy{{{SEL}}}"
+AVG_BUSY_NODE = f"node_avg_processor_busy{{{SEL}}}"
+
+# Cluster-interconnect ports are identified by ipspace, not by name. Name regexes
+# cannot work across platforms: cluster ports are e4a/e4b on A30, e1a/e7a on
+# A70/A90 and e0a/e0b only on older FAS/AFF.
+DATA_PORTS = f'(net_port_status{{{SEL},ipspace!="Cluster",port!~"$ExcludePorts"}} == 1)'
+
+# nic_util_percent is 0-1 in Harvest. The `unless` clause falls back to the plain
+# name regex only for clusters where net_port is entirely absent (Rest config
+# collector disabled); a bare `or` would instead add the cluster ports back in.
+NIC_NODE = f"""(
+  nic_util_percent{{{SEL}}} * 100
+  * on (datacenter, cluster, node, nic) group_left ()
+    label_replace({DATA_PORTS}, "nic", "$1", "port", "(.*)")
+)
+or (
+  (nic_util_percent{{{SEL},nic!~"$ExcludePorts"}} * 100)
+  unless on (datacenter, cluster) {DATA_PORTS}
 )"""
 
-PCU_P95 = f"quantile_over_time(0.95, ({PCU})[$Window:])"
+_IFGRP_SEL = f'{SEL},ports!=""'
+_RX = f"nic_ifgrp_rx_perc{{{_IFGRP_SEL}}}"
+_TX = f"nic_ifgrp_tx_perc{{{_IFGRP_SEL}}}"
 
-CPU_BUSY_SUM = f"sum by (cluster) (node_cpu_busy{{{SEL}}})"
-CPU_BUSY_P95 = f"quantile_over_time(0.95, ({CPU_BUSY_SUM})[$Window:])"
-
-CONF_MIN = f"min by (cluster) (headroom_cpu_optimal_point_confidence_factor{{{SEL}}})"
-
-IFGRP_MAX_DIR = f"""(
-  nic_ifgrp_rx_perc{{{IFGRP_SEL}}}
-  + nic_ifgrp_tx_perc{{{IFGRP_SEL}}}
-  + abs(nic_ifgrp_rx_perc{{{IFGRP_SEL}}} - nic_ifgrp_tx_perc{{{IFGRP_SEL}}})
+# max(rx, tx) without max(): a full-duplex LAG is not the sum of both directions,
+# and whichever direction binds first is the one that matters after takeover.
+IFGRP_NODE = f"""(
+  {_RX}
+  + {_TX}
+  + abs({_RX} - {_TX})
 ) / 2 * 100"""
 
-IFGRP_SURVIVOR = f"sum by (cluster, ifgroup) ({IFGRP_MAX_DIR})"
-IFGRP_HOT_P95 = f"quantile_over_time(0.95, (max by (cluster) ({IFGRP_SURVIVOR}))[$Window:])"
+FCP_NODE = f"fcp_util_percent{{{SEL}}} * 100"
 
-NIC_SURVIVOR = f"sum by (cluster, nic) (nic_util_percent{{{NIC_SEL}}}) * 100"
-NIC_HOT_P95 = f"quantile_over_time(0.95, (max by (cluster) ({NIC_SURVIVOR}))[$Window:])"
 
-FCP_SURVIVOR = f"sum by (cluster, port) (fcp_util_percent{{{SEL}}}) * 100"
-FCP_HOT_P95 = f"quantile_over_time(0.95, (max by (cluster) ({FCP_SURVIVOR}))[$Window:])"
+# --------------------------------------------------------------------------------
+# Pair-level scores
+# --------------------------------------------------------------------------------
 
-PORT_HOT = f"""max by (cluster) (
-  ({NIC_HOT_P95})
-  or ({IFGRP_HOT_P95})
-  or ({FCP_HOT_P95})
-)"""
+PCU_PAIR = pair_sum(PCU_NODE)
+BUSY_PAIR = pair_sum(BUSY_NODE)
+CONF_PAIR_OK = f"(\n{pair_sum(CONF_OK_NODE)}\n) == 2"
 
-CPU_RISK = f"""(
-  (({CONF_MIN}) >= bool 2)
-  *
-  clamp_max(
-    ((({PCU_P95}) >= bool 160) + (({PCU_P95}) >= bool 200)),
-    2
-  )
-)
-+
+NIC_PAIR = pair_sum(NIC_NODE, extra=("nic",))
+IFGRP_PAIR = pair_sum(IFGRP_NODE, extra=("ifgroup",))
+
+_PORT_PARTS = {"nic": NIC_PAIR, "ifgrp": IFGRP_PAIR}
+if INCLUDE_FC:
+    _PORT_PARTS["fc"] = pair_sum(FCP_NODE, extra=("port",))
+
+PORT_HOT_PAIR = worst_of(_PORT_PARTS)
+
+PCU_PAIR_P95 = p95(PCU_PAIR)
+BUSY_PAIR_P95 = p95(BUSY_PAIR)
+PORT_HOT_P95 = p95(PORT_HOT_PAIR)
+
+# PCU is only trustworthy when ONTAP's optimal point is measured rather than seeded.
+# `or` is the correct operator here because both branches share a label set, so it
+# is a true fallback -- including when headroom_cpu_* is missing altogether.
+CPU_INDEX = f"""(
 (
-  (({CONF_MIN}) < bool 2)
-  *
-  clamp_max(
-    ((({CPU_BUSY_P95}) >= bool 70) + (({CPU_BUSY_P95}) >= bool 85)),
-    2
-  )
+{risk_index(PCU_PAIR_P95, "$PcuYellow", "$PcuRed")}
+)
+and on ({keys(PAIR_KEYS)}) (
+{CONF_PAIR_OK}
+)
+)
+or (
+{risk_index(BUSY_PAIR_P95, "$BusyYellow", "$BusyRed")}
 )"""
 
-PORT_RISK = f"""clamp_max(
-  (({PORT_HOT}) >= bool 70) + (({PORT_HOT}) >= bool 85),
-  2
-)"""
+PORT_INDEX = risk_index(PORT_HOT_P95, "$PortYellow", "$PortRed")
 
-OVERALL = f"max by (cluster) (({CPU_RISK}) or ({PORT_RISK}))"
+INDEX_BY_RESOURCE = {"cpu": CPU_INDEX, "network": PORT_INDEX}
+OVERALL_PAIR = worst_of(INDEX_BY_RESOURCE)
+OVERALL_CLUSTER = f"max by ({keys(CLUSTER_KEYS)}) (\n{OVERALL_PAIR}\n)"
+
+# Roll-ups for the headline numbers, kept in native units because those are the
+# values an admin can check against ONTAP.
+PCU_CLUSTER_P95 = f"max by ({keys(CLUSTER_KEYS)}) (\n{PCU_PAIR_P95}\n)"
+BUSY_CLUSTER_P95 = f"max by ({keys(CLUSTER_KEYS)}) (\n{BUSY_PAIR_P95}\n)"
+PORT_CLUSTER_P95 = f"max by ({keys(CLUSTER_KEYS)}) (\n{PORT_HOT_P95}\n)"
+
+# Health of the model itself.
+HA_COVERAGE = f"""count by ({keys(CLUSTER_KEYS)}) ({NODE_LABELS})
+/
+count by ({keys(CLUSTER_KEYS)}) (node_labels{{{SEL}}})"""
+
+CONF_MIN_CLUSTER = (
+    f"min by ({keys(CLUSTER_KEYS)}) "
+    f"(headroom_cpu_optimal_point_confidence_factor{{{SEL}}})"
+)
+
+# Summing normalized percentages assumes both nodes have the same capacity. That
+# holds inside a real HA pair; >1 model in a cluster is worth surfacing anyway.
+MODEL_COUNT = (
+    f"count by ({keys(CLUSTER_KEYS)}) "
+    f"(count by (datacenter, cluster, model) (node_labels{{{SEL}}}))"
+)
 
 
-def target(expr: str, legend: str = "", ref_id: str = "A", instant: bool = False) -> dict:
+# --------------------------------------------------------------------------------
+# Panel builders
+# --------------------------------------------------------------------------------
+
+
+def target(
+    expr: str,
+    legend: str = "",
+    ref_id: str = "A",
+    instant: bool = False,
+    fmt: str | None = None,
+    interval: str = "",
+) -> dict:
     t = {
         "datasource": DS,
         "exemplar": False,
         "expr": expr.strip(),
-        "interval": "",
+        "interval": interval,
         "legendFormat": legend,
         "refId": ref_id,
     }
     if instant:
         t["instant"] = True
+    if fmt:
+        t["format"] = fmt
     return t
 
 
 def thresholds(*steps: tuple[str, float | None]) -> dict:
-    out = []
-    for color, value in steps:
-        item = {"color": color, "value": value}
-        out.append(item)
-    return {"mode": "absolute", "steps": out}
+    return {
+        "mode": "absolute",
+        "steps": [{"color": color, "value": value} for color, value in steps],
+    }
 
 
-def field_defaults(unit: str = "short", **extra) -> dict:
+def field_defaults(unit: str = "short", decimals=None, **extra) -> dict:
     cfg = {
         "color": {"mode": "palette-classic"},
         "custom": {
@@ -118,39 +287,77 @@ def field_defaults(unit: str = "short", **extra) -> dict:
         "thresholds": thresholds(("green", None)),
         "unit": unit,
     }
+    if decimals is not None:
+        cfg["decimals"] = decimals
     cfg.update(extra)
     return cfg
 
 
-def timeseries(pid: int, title: str, x: int, y: int, w: int, h: int, targets: list, unit: str = "percent", description: str = "", thresh=None) -> dict:
-    defaults = field_defaults(unit)
+def timeseries(
+    pid: int,
+    title: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    targets: list,
+    unit: str = "percent",
+    description: str = "",
+    thresh=None,
+    decimals=None,
+    max_data_points=None,
+) -> dict:
+    defaults = field_defaults(unit, decimals=decimals)
     if thresh:
         defaults["thresholds"] = thresh
         defaults["custom"]["thresholdsStyle"] = {"mode": "line+area"}
         defaults["color"] = {"mode": "thresholds"}
-    return {
+    panel = {
         "datasource": DS,
         "description": description,
         "fieldConfig": {"defaults": defaults, "overrides": []},
         "gridPos": {"h": h, "w": w, "x": x, "y": y},
         "id": pid,
         "options": {
-            "legend": {"calcs": ["mean", "lastNotNull", "max"], "displayMode": "table", "placement": "bottom"},
+            "legend": {
+                "calcs": ["mean", "lastNotNull", "max"],
+                "displayMode": "table",
+                "placement": "bottom",
+            },
             "tooltip": {"mode": "multi", "sort": "desc"},
         },
         "targets": targets,
         "title": title,
         "type": "timeseries",
     }
+    if max_data_points:
+        panel["maxDataPoints"] = max_data_points
+    return panel
 
 
-def stat(pid: int, title: str, x: int, y: int, w: int, h: int, targets: list, unit: str, thresh, description: str = "", mappings=None) -> dict:
+def stat(
+    pid: int,
+    title: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    targets: list,
+    unit: str,
+    thresh,
+    description: str = "",
+    mappings=None,
+    decimals=None,
+    text_mode: str = "auto",
+) -> dict:
     defaults = {
         "color": {"mode": "thresholds"},
         "mappings": mappings or [],
         "thresholds": thresh,
         "unit": unit,
     }
+    if decimals is not None:
+        defaults["decimals"] = decimals
     return {
         "datasource": DS,
         "description": description,
@@ -159,11 +366,15 @@ def stat(pid: int, title: str, x: int, y: int, w: int, h: int, targets: list, un
         "id": pid,
         "options": {
             "colorMode": "background",
-            "graphMode": "area",
+            "graphMode": "none",
             "justifyMode": "auto",
             "orientation": "auto",
-            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
-            "textMode": "auto",
+            "reduceOptions": {
+                "calcs": ["lastNotNull"],
+                "fields": "",
+                "values": False,
+            },
+            "textMode": text_mode,
         },
         "pluginVersion": "8.1.8",
         "targets": targets,
@@ -172,437 +383,813 @@ def stat(pid: int, title: str, x: int, y: int, w: int, h: int, targets: list, un
     }
 
 
-def row(pid: int, title: str, y: int) -> dict:
+def state_timeline(
+    pid: int,
+    title: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    targets: list,
+    thresh,
+    mappings,
+    description: str = "",
+    time_from: str = "7d",
+) -> dict:
     return {
-        "collapsed": False,
+        "datasource": DS,
+        "description": description,
+        "fieldConfig": {
+            "defaults": {
+                "color": {"mode": "thresholds"},
+                "custom": {
+                    "fillOpacity": 85,
+                    "lineWidth": 0,
+                    "spanNulls": False,
+                },
+                "mappings": mappings,
+                "thresholds": thresh,
+                "unit": "short",
+            },
+            "overrides": [],
+        },
+        "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "id": pid,
+        "maxDataPoints": 400,
+        "options": {
+            "alignValue": "center",
+            "legend": {"displayMode": "list", "placement": "bottom"},
+            "mergeValues": True,
+            "rowHeight": 0.9,
+            "showValue": "never",
+            "tooltip": {"mode": "single"},
+        },
+        "targets": targets,
+        "timeFrom": time_from,
+        "title": title,
+        "type": "state-timeline",
+    }
+
+
+def table(
+    pid: int,
+    title: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    targets: list,
+    include_pattern: str,
+    description: str = "",
+) -> dict:
+    return {
+        "datasource": DS,
+        "description": description,
+        "fieldConfig": {
+            "defaults": {
+                "custom": {"align": "auto", "displayMode": "auto"},
+                "mappings": [],
+                "thresholds": thresholds(("green", None)),
+            },
+            "overrides": [],
+        },
+        "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "id": pid,
+        "options": {"showHeader": True},
+        "pluginVersion": "8.1.8",
+        "targets": targets,
+        "title": title,
+        "transformations": [
+            {"id": "filterFieldsByName", "options": {"include": {"pattern": include_pattern}}}
+        ],
+        "type": "table",
+    }
+
+
+def row(pid: int, title: str, y: int, collapsed: bool = False, panels=None) -> dict:
+    return {
+        "collapsed": collapsed,
         "datasource": DS,
         "gridPos": {"h": 1, "w": 24, "x": 0, "y": y},
         "id": pid,
-        "panels": [],
+        "panels": panels or [],
         "title": title,
         "type": "row",
     }
 
 
-def text_panel(pid: int, y: int) -> dict:
-    md = """**How to read this dashboard**
+NOTES = """**What this scores**
 
-Score is **takeover on the surviving node**, not current per-node health. Overall = worst of CPU and ports (95th percentile over **$Window**).
+Whether the **surviving node** could absorb its partner's load after a takeover — not
+whether a node is healthy today. Every score is per **HA pair**; the cluster value is
+the **worst pair**, because ONTAP moves a failed node's work to its partner only, never
+across the cluster.
 
-- **Green** — takeover should not cause a problem
-- **Yellow** — risk of higher latency; avoid planned failover at peak
-- **Red** — risk of service interruption / unacceptable latency
+- 🟢 **OK** — takeover should not cause a problem
+- 🟡 **Latency risk** — avoid a planned failover at peak
+- 🔴 **Service impact risk** — expect unacceptable latency or loss
 
-CPU uses combined **performance capacity used** (PCU = current / optimal × 100, summed across the HA pair) when headroom confidence ≥ 2; otherwise the sum of `node_cpu_busy`. Ports sum util of the same ifgrp/NIC/FC port **name** on both nodes. Cluster/mgmt NICs matching **ExcludePorts** are ignored.
+Inputs are the **95th percentile over $Window**, so a brief spike will not flip the light.
+CPU uses combined **performance capacity used** (current ÷ optimal point) when ONTAP's
+optimal-point confidence is ≥ $ConfMin on both nodes, otherwise the sum of `node_cpu_busy`.
+Network sums the same NIC or ifgrp on both nodes. Cluster-interconnect ports are excluded
+by **ipspace**, not by port name.
 
-**Caveats:** summing CPU is a proxy (HA overhead still exists). SAN multipath can make FC sums an **upper bound**. This is not AIUM estimated ms/op after takeover. Aggregate/disk headroom is omitted (AFF)."""
-    return {
-        "datasource": DS,
-        "gridPos": {"h": 8, "w": 8, "x": 16, "y": y},
-        "id": pid,
-        "options": {"content": md, "mode": "markdown"},
-        "title": "Notes",
-        "type": "text",
-    }
+**Limits.** Summing CPU is a proxy — takeover adds HA overhead on top. Harvest has no NVRAM
+or HA-interconnect counter, so those are unmodelled. Harvest has no per-port iSCSI or
+NVMe-TCP utilization either, so that traffic is scored through its Ethernet ports.
+Aggregate and disk headroom are omitted deliberately (all-flash). This is not AIQUM's
+estimated ms/op after takeover."""
 
 
+INDEX_THRESH = thresholds(("green", None), ("yellow", 1), ("red", 2))
 PCU_THRESH = thresholds(("green", None), ("yellow", 160), ("red", 200))
 BUSY_THRESH = thresholds(("green", None), ("yellow", 70), ("red", 85))
 PORT_THRESH = thresholds(("green", None), ("yellow", 70), ("red", 85))
-RISK_THRESH = thresholds(("green", None), ("yellow", 1), ("red", 2))
 CONF_THRESH = thresholds(("red", None), ("yellow", 2), ("green", 3))
+COVERAGE_THRESH = thresholds(("red", None), ("green", 1))
+MODEL_THRESH = thresholds(("green", None), ("yellow", 2))
 
-RISK_MAP = [
-    {"type": "value", "options": {"0": {"text": "OK — takeover headroom", "color": "green"}}},
-    {"type": "range", "options": {"from": 0.5, "to": 1.5, "result": {"text": "Latency risk", "color": "yellow"}}},
-    {"type": "range", "options": {"from": 1.5, "to": 9, "result": {"text": "Service interruption risk", "color": "red"}}},
+INDEX_MAP = [
+    {
+        "type": "range",
+        "options": {
+            "from": -1,
+            "to": 1,
+            "result": {"text": "OK", "color": "green", "index": 0},
+        },
+    },
+    {
+        "type": "range",
+        "options": {
+            "from": 1,
+            "to": 2,
+            "result": {"text": "Latency risk", "color": "yellow", "index": 1},
+        },
+    },
+    {
+        "type": "range",
+        "options": {
+            "from": 2,
+            "to": 1000,
+            "result": {"text": "Service impact risk", "color": "red", "index": 2},
+        },
+    },
+]
+
+COVERAGE_MAP = [
+    {
+        "type": "range",
+        "options": {
+            "from": -1,
+            "to": 0.999,
+            "result": {"text": "Incomplete — see docs", "color": "red", "index": 0},
+        },
+    },
+    {
+        "type": "range",
+        "options": {
+            "from": 0.999,
+            "to": 1000,
+            "result": {"text": "All nodes paired", "color": "green", "index": 1},
+        },
+    },
 ]
 
 
-def query_var(name: str, query: str, label=None, include_all=True, hide=0, regex="") -> dict:
+def query_var(name: str, query: str, label=None) -> dict:
     return {
-        "allValue": ".*" if include_all else None,
+        "allValue": ".*",
         "current": {},
         "datasource": DS,
         "definition": query,
         "description": None,
         "error": None,
-        "hide": hide,
-        "includeAll": include_all,
+        "hide": 0,
+        "includeAll": True,
         "label": label,
-        "multi": True if include_all else False,
+        "multi": True,
         "name": name,
         "options": [],
         "query": {"query": query, "refId": "StandardVariableQuery"},
         "refresh": 2,
-        "regex": regex,
+        "regex": "",
         "skipUrlSync": False,
         "sort": 7,
         "type": "query",
     }
 
 
+def custom_var(
+    name: str, values: list[str], default: str, label: str, hide: int = 0
+) -> dict:
+    return {
+        "current": {"selected": True, "text": default, "value": default},
+        "hide": hide,
+        "includeAll": False,
+        "label": label,
+        "multi": False,
+        "name": name,
+        "options": [
+            {"selected": v == default, "text": v, "value": v} for v in values
+        ],
+        "query": ",".join(values),
+        "skipUrlSync": False,
+        "type": "custom",
+    }
+
+
 def build() -> dict:
-    panels = []
-    y = 0
+    panels: list[dict] = []
     pid = 1
 
-    panels.append(row(pid, "Overall HA headroom", y))
-    pid += 1
+    def next_id() -> int:
+        nonlocal pid
+        current = pid
+        pid += 1
+        return current
+
+    # ---------------------------------------------------------------- readiness
+    y = 0
+    panels.append(row(next_id(), "Takeover readiness", y))
     y += 1
 
     panels.append(
         stat(
-            pid,
-            "Overall HA headroom",
+            next_id(),
+            "Can this cluster survive a node loss?",
             0,
             y,
             8,
             8,
-            [target(OVERALL, "{{cluster}}", instant=True)],
+            [target(OVERALL_CLUSTER, "{{cluster}}", instant=True)],
             "short",
-            RISK_THRESH,
-            "Worst of CPU risk and port risk. 0 green / 1 yellow / 2 red. Uses 95th percentile over $Window. CPU uses PCU when min confidence ≥ 2, else sum of node_cpu_busy.",
-            RISK_MAP,
+            INDEX_THRESH,
+            "Worst HA pair in the cluster. Risk index: 1.0 is the yellow line, 2.0 the red "
+            "line. Worst of CPU and network, 95th percentile over $Window.",
+            INDEX_MAP,
+            text_mode="value_and_name",
         )
     )
-    pid += 1
     panels.append(
         stat(
-            pid,
-            "Combined PCU (95th)",
+            next_id(),
+            "Combined PCU after takeover (p95)",
             8,
             y,
             4,
             4,
-            [target(PCU_P95, "{{cluster}}", instant=True)],
+            [target(PCU_CLUSTER_P95, "{{cluster}}", instant=True)],
             "percent",
             PCU_THRESH,
-            "Sum of per-node performance capacity used. 200% ≈ survivor at the latency knee (AIUM HA pair over-utilized).",
+            "Sum of both nodes' performance capacity used. 200% means the survivor would sit "
+            "exactly at ONTAP's latency knee — the same line AIQUM calls 'HA pair "
+            "over-utilized'. Only meaningful when confidence is >= $ConfMin.",
+            decimals=0,
         )
     )
-    pid += 1
     panels.append(
         stat(
-            pid,
-            "Sum CPU busy (95th)",
+            next_id(),
+            "Hottest survivor port (p95)",
             12,
             y,
             4,
             4,
-            [target(CPU_BUSY_P95, "{{cluster}}", instant=True)],
-            "percent",
-            BUSY_THRESH,
-            "Sum of node_cpu_busy (hottest CPU domain). Fallback when headroom confidence is low.",
-        )
-    )
-    pid += 1
-    panels.append(text_panel(pid, y))
-    pid += 1
-
-    y2 = y + 4
-    panels.append(
-        stat(
-            pid,
-            "Headroom confidence (min)",
-            8,
-            y2,
-            4,
-            4,
-            [target(CONF_MIN, "{{cluster}}", instant=True)],
-            "short",
-            CONF_THRESH,
-            "0 unknown, 1 low (do not trust PCU), 2 medium, 3 high.",
-        )
-    )
-    pid += 1
-    panels.append(
-        stat(
-            pid,
-            "Hottest survivor port (95th)",
-            12,
-            y2,
-            4,
-            4,
-            [
-                target(NIC_HOT_P95, "NIC {{cluster}}", "A", True),
-                target(IFGRP_HOT_P95, "ifgrp {{cluster}}", "B", True),
-                target(FCP_HOT_P95, "FC {{cluster}}", "C", True),
-            ],
+            [target(PORT_CLUSTER_P95, "{{cluster}}", instant=True)],
             "percent",
             PORT_THRESH,
-            "Max estimated survivor util: sum of same-named NIC / ifgrp / FC port across both nodes. nic_util and fcp_util are 0–1 in Harvest.",
+            "Worst NIC or ifgrp once both nodes' traffic lands on one controller. Covers NAS, "
+            "iSCSI and NVMe-TCP, which all share these Ethernet ports.",
+            decimals=0,
         )
     )
-    pid += 1
+    panels.append(
+        {
+            "datasource": DS,
+            "gridPos": {"h": 8, "w": 8, "x": 16, "y": y},
+            "id": next_id(),
+            "options": {"content": NOTES, "mode": "markdown"},
+            "title": "How to read this",
+            "type": "text",
+        }
+    )
+
+    panels.append(
+        stat(
+            next_id(),
+            "Combined CPU busy after takeover (p95)",
+            8,
+            y + 4,
+            4,
+            4,
+            [target(BUSY_CLUSTER_P95, "{{cluster}}", instant=True)],
+            "percent",
+            BUSY_THRESH,
+            "Sum of node_cpu_busy (hottest CPU domain, or remaining idle, whichever binds "
+            "first). This drives the score whenever headroom confidence is low — which is "
+            "common, since ONTAP reports confidence 1 until it has measured enough load.",
+            decimals=0,
+        )
+    )
+    panels.append(
+        stat(
+            next_id(),
+            "Headroom confidence (worst node)",
+            12,
+            y + 4,
+            2,
+            4,
+            [target(CONF_MIN_CLUSTER, "{{cluster}}", instant=True)],
+            "short",
+            CONF_THRESH,
+            "0 unknown, 1 seed value (PCU not trustworthy — CPU busy is used instead), "
+            "2 medium, 3 high.",
+            decimals=0,
+        )
+    )
+    panels.append(
+        stat(
+            next_id(),
+            "Distinct node models",
+            14,
+            y + 4,
+            2,
+            4,
+            [target(MODEL_COUNT, "{{cluster}}", instant=True)],
+            "short",
+            MODEL_THRESH,
+            "Summing normalized CPU percentages assumes both nodes have equal capacity. "
+            "1 means the cluster is uniform. More than 1 means check that each HA pair is "
+            "still same-model before trusting the score.",
+            decimals=0,
+        )
+    )
     y += 8
 
-    panels.append(row(pid, "CPU performance capacity", y))
-    pid += 1
+    # ------------------------------------------------------------------ per pair
+    panels.append(row(next_id(), "Per HA pair", y))
     y += 1
 
-    pcu_node = f"""100 *
-  headroom_cpu_current_utilization{{{SEL}}}
-  /
-  clamp_min(headroom_cpu_optimal_point_utilization{{{SEL}}}, 1e-3)"""
+    panels.append(
+        stat(
+            next_id(),
+            "Takeover risk per HA pair",
+            0,
+            y,
+            8,
+            7,
+            [target(OVERALL_PAIR, "{{survivor}} absorbs {{victim}}", instant=True)],
+            "short",
+            INDEX_THRESH,
+            "One tile per direction: the named survivor absorbing the named victim. A 2-node "
+            "cluster shows two tiles with the same value because the model is symmetric "
+            "within a same-model pair.",
+            INDEX_MAP,
+            text_mode="value_and_name",
+        )
+    )
     panels.append(
         timeseries(
-            pid,
+            next_id(),
+            "Risk index by resource",
+            8,
+            y,
+            8,
+            7,
+            [
+                target(
+                    worst_of(INDEX_BY_RESOURCE, k=PAIR_KEYS + ("resource",)),
+                    "{{resource}}: {{survivor}} absorbs {{victim}}",
+                )
+            ],
+            "short",
+            "Which resource is driving the score. 1.0 = yellow line, 2.0 = red line.",
+            INDEX_THRESH,
+            decimals=2,
+        )
+    )
+    panels.append(
+        table(
+            next_id(),
+            "HA pairs, models and partner health",
+            16,
+            y,
+            8,
+            7,
+            [target(f"node_labels{{{SEL}}}", "", instant=True, fmt="table")],
+            "^(cluster|node|ha_partner|model|version|healthy|partner_healthy)$",
+            "From the Harvest Rest config collector. An empty ha_partner column means the "
+            "pair-aware queries cannot resolve that node.",
+        )
+    )
+    y += 7
+
+    panels.append(
+        state_timeline(
+            next_id(),
+            "Takeover risk over the last 7 days — pick a maintenance window",
+            0,
+            y,
+            20,
+            8,
+            [
+                target(
+                    OVERALL_PAIR,
+                    "{{survivor}} absorbs {{victim}}",
+                    interval="10m",
+                )
+            ],
+            INDEX_THRESH,
+            INDEX_MAP,
+            "Green bands are safe windows for a planned takeover or an ONTAP upgrade. "
+            "Ignores this dashboard's time picker and always shows 7 days.",
+        )
+    )
+    panels.append(
+        stat(
+            next_id(),
+            "HA partner coverage",
+            20,
+            y,
+            4,
+            8,
+            [target(HA_COVERAGE, "{{cluster}}", instant=True)],
+            "percentunit",
+            COVERAGE_THRESH,
+            "Fraction of nodes with an ha_partner label. Anything below 1 means the pair "
+            "scores above are incomplete: check that the Harvest Rest collector is enabled "
+            "and Harvest is 24.05 or newer.",
+            COVERAGE_MAP,
+            text_mode="value_and_name",
+        )
+    )
+    y += 8
+
+    # ----------------------------------------------------------- CPU capacity
+    panels.append(row(next_id(), "CPU performance capacity", y))
+    y += 1
+
+    panels.append(
+        timeseries(
+            next_id(),
             "PCU per node",
             0,
             y,
             12,
             8,
-            [target(pcu_node, "{{node}}")],
+            [target(PCU_NODE, "{{node}}")],
             "percent",
-            "Per-node performance capacity used = 100 × current_utilization / optimal_point_utilization.",
+            "Performance capacity used = 100 x current_utilization / optimal_point_utilization. "
+            "A node missing here has no populated optimal point.",
         )
     )
-    pid += 1
     panels.append(
         timeseries(
-            pid,
-            "Combined PCU (takeover estimate)",
+            next_id(),
+            "Combined PCU per HA pair",
             12,
             y,
             12,
             8,
-            [target(PCU, "{{cluster}}")],
+            [target(PCU_PAIR, "{{survivor}} absorbs {{victim}}")],
             "percent",
-            "Green < 160, yellow 160–200, red > 200 (AIUM pair over-utilized at 200%).",
+            "Green below $PcuYellow, yellow to $PcuRed, red beyond. 200% is the survivor "
+            "sitting exactly at its latency knee.",
             PCU_THRESH,
         )
     )
-    pid += 1
     y += 8
 
     panels.append(
         timeseries(
-            pid,
-            "CPU utilization vs optimal point",
+            next_id(),
+            "CPU utilization vs ONTAP optimal point",
             0,
             y,
             12,
             8,
             [
-                target(f"headroom_cpu_current_utilization{{{SEL}}}", "current {{node}}", "A"),
-                target(f"headroom_cpu_optimal_point_utilization{{{SEL}}}", "optimal {{node}}", "B"),
+                target(
+                    f"headroom_cpu_current_utilization{{{SEL}}}", "current {{node}}", "A"
+                ),
+                target(
+                    f"headroom_cpu_optimal_point_utilization{{{SEL}}}",
+                    "optimal {{node}}",
+                    "B",
+                ),
             ],
             "percent",
-            "Current average CPU vs ONTAP optimal-point utilization (latency knee).",
+            "The optimal point is the latency knee: past it, latency rises "
+            "disproportionately to added load.",
         )
     )
-    pid += 1
     panels.append(
         timeseries(
-            pid,
-            "Available CPU ops (optimal − current)",
+            next_id(),
+            "Headroom confidence factor",
             12,
             y,
             12,
             8,
             [
                 target(
-                    f"headroom_cpu_optimal_point_ops{{{SEL}}} - headroom_cpu_current_ops{{{SEL}}}",
-                    "{{node}}",
+                    f"headroom_cpu_optimal_point_confidence_factor{{{SEL}}}", "{{node}}"
                 )
             ],
-            "iops",
-            "Negative means current ops already exceed the optimal-point ops.",
+            "short",
+            "1 means ONTAP is using a seed value, not a measured curve — expected on lightly "
+            "loaded or recently rebooted nodes, and a reason the CPU busy fallback matters.",
+            decimals=0,
         )
     )
-    pid += 1
     y += 8
 
     panels.append(
         timeseries(
-            pid,
-            "Headroom confidence factor",
+            next_id(),
+            "Available CPU ops (optimal - current, confidence > 1 only)",
             0,
             y,
             24,
             6,
-            [target(f"headroom_cpu_optimal_point_confidence_factor{{{SEL}}}", "{{node}}")],
-            "short",
-            "1 = seed/low — ignore PCU and use CPU busy. 2–3 = usable optimal point.",
+            [
+                target(
+                    f"(\n  headroom_cpu_optimal_point_ops{{{SEL}}}\n"
+                    f"  - headroom_cpu_current_ops{{{SEL}}}\n)\n"
+                    f"and (headroom_cpu_optimal_point_confidence_factor{{{SEL}}} > 1)",
+                    "{{node}}",
+                )
+            ],
+            "iops",
+            "Gated on confidence > 1, matching stock Harvest behaviour. Negative means the "
+            "node is already running past its optimal-point ops.",
         )
     )
-    pid += 1
     y += 6
 
-    panels.append(row(pid, "CPU busy (hottest domain)", y))
-    pid += 1
+    # --------------------------------------------------------------- CPU busy
+    panels.append(row(next_id(), "CPU busy (fallback model, and sanity check)", y))
     y += 1
+
     panels.append(
         timeseries(
-            pid,
-            "node_cpu_busy per node and HA sum",
+            next_id(),
+            "node_cpu_busy per node and per HA pair",
             0,
             y,
             12,
             8,
             [
-                target(f"node_cpu_busy{{{SEL}}}", "{{node}}", "A"),
-                target(CPU_BUSY_SUM, "sum (takeover est.)", "B"),
+                target(BUSY_NODE, "{{node}}", "A"),
+                target(BUSY_PAIR, "{{survivor}} absorbs {{victim}}", "B"),
             ],
             "percent",
-            "node_cpu_busy is limited by the hottest CPU domain or remaining idle, whichever binds first.",
+            "node_cpu_busy tracks the hottest CPU domain or remaining idle, whichever binds "
+            "first, so it is the better 'how close to the wall' number. Keep each node under "
+            "roughly 40-50% if you want the pair sum to stay green.",
             BUSY_THRESH,
         )
     )
-    pid += 1
     panels.append(
         timeseries(
-            pid,
-            "Average processor busy (per node and sum)",
+            next_id(),
+            "Average processor busy per node",
             12,
+            y,
+            12,
+            8,
+            [target(AVG_BUSY_NODE, "{{node}}")],
+            "percent",
+            "Mean across cores. Can look comfortable while a single domain is saturated, "
+            "which is why it is not used for the traffic light.",
+        )
+    )
+    y += 8
+
+    # ---------------------------------------------------------------- Ethernet
+    panels.append(
+        row(next_id(), "Ethernet data ports — NAS, iSCSI and NVMe-TCP", y)
+    )
+    y += 1
+
+    panels.append(
+        timeseries(
+            next_id(),
+            "NIC utilization per node (cluster ipspace excluded)",
+            0,
+            y,
+            12,
+            8,
+            [target(NIC_NODE, "{{node}} {{nic}}")],
+            "percent",
+            "Harvest nic_util_percent is max(rx, tx) on a 0-1 scale, shown here x100. Ports "
+            "are filtered by ipspace via net_port_status rather than by name, because cluster "
+            "port names differ per platform (e4a/e4b on A30, e1a/e7a on A70 and A90).",
+        )
+    )
+    panels.append(
+        timeseries(
+            next_id(),
+            "Estimated survivor NIC utilization",
+            12,
+            y,
+            12,
+            8,
+            [target(NIC_PAIR, "{{nic}} on {{survivor}}")],
+            "percent",
+            "Same port name on both nodes of the pair, added together.",
+            PORT_THRESH,
+        )
+    )
+    y += 8
+
+    panels.append(
+        timeseries(
+            next_id(),
+            "ifgrp max(rx, tx) per node",
+            0,
+            y,
+            12,
+            8,
+            [target(IFGRP_NODE, "{{node}} {{ifgroup}}")],
+            "percent",
+            "Preferred model for NAS: data LIFs fail over onto the partner's LAG. Harvest "
+            "labels these ifgroup and ports, where ports is a comma-joined member list.",
+        )
+    )
+    panels.append(
+        timeseries(
+            next_id(),
+            "Estimated survivor ifgrp utilization",
+            12,
+            y,
+            12,
+            8,
+            [target(IFGRP_PAIR, "{{ifgroup}} on {{survivor}}")],
+            "percent",
+            "For equal-speed LAGs with the same name on both nodes, this answers: would the "
+            "remaining LAG exceed its capacity?",
+            PORT_THRESH,
+        )
+    )
+    y += 8
+
+    panels.append(
+        table(
+            next_id(),
+            "Ethernet ports in scope",
+            0,
+            y,
+            24,
+            8,
+            [target(f"({DATA_PORTS})", "", instant=True, fmt="table")],
+            "^(cluster|node|port|role|port_type|ipspace|broadcast|op_speed|status)$",
+            "Exactly the ports the network score considers. If a data port is missing here it "
+            "is not being scored; if a cluster port appears, adjust ExcludePorts.",
+        )
+    )
+    y += 8
+
+    # ------------------------------------------------------------------ SAN/FC
+    if INCLUDE_FC:
+        panels.append(row(next_id(), "SAN (FC) — upper bound", y))
+        y += 1
+        panels.append(
+            timeseries(
+                next_id(),
+                "FC target port utilization per node",
+                0,
+                y,
+                12,
+                8,
+                [target(FCP_NODE, "{{node}} {{port}}")],
+                "percent",
+                "Harvest fcp_util_percent is 0-1, shown x100.",
+            )
+        )
+        panels.append(
+            timeseries(
+                next_id(),
+                "Estimated survivor FC utilization",
+                12,
+                y,
+                12,
+                8,
+                [target(pair_sum(FCP_NODE, extra=("port",)), "{{port}} on {{survivor}}")],
+                "percent",
+                "Upper bound only: multipath hosts already send some I/O to the survivor, and "
+                "fcp_util_percent carries a speed label, so summing across ports of differing "
+                "speed is not meaningful.",
+                PORT_THRESH,
+            )
+        )
+        y += 8
+
+    # ----------------------------------------------------------------- context
+    panels.append(
+        row(next_id(), "Context — is the cluster already hurting? (not scored)", y)
+    )
+    y += 1
+
+    panels.append(
+        timeseries(
+            next_id(),
+            "Node latency, all protocols",
+            0,
             y,
             12,
             8,
             [
-                target(f"node_avg_processor_busy{{{SEL}}}", "{{node}}", "A"),
-                target(f"sum by (cluster) (node_avg_processor_busy{{{SEL}}})", "sum", "B"),
+                target(f"node_total_latency{{{SEL}}}", "total {{node}}", "A"),
+                target(f"node_read_latency{{{SEL}}}", "read {{node}}", "B"),
+                target(f"node_write_latency{{{SEL}}}", "write {{node}}", "C"),
             ],
-            "percent",
-            "Average across cores — can look fine while one domain is saturated. Prefer node_cpu_busy for the traffic light.",
-        )
-    )
-    pid += 1
-    y += 8
-
-    panels.append(row(pid, "Ethernet / ifgrp (exclude cluster and mgmt)", y))
-    pid += 1
-    y += 1
-    panels.append(
-        timeseries(
-            pid,
-            "NIC util % (cluster/mgmt excluded)",
-            0,
-            y,
-            12,
-            8,
-            [target(f"nic_util_percent{{{NIC_SEL}}} * 100", "{{node}} {{nic}}")],
-            "percent",
-            "Harvest nic_util_percent is 0–1. ExcludePorts default e0a|e0b|e0M.",
-        )
-    )
-    pid += 1
-    panels.append(
-        timeseries(
-            pid,
-            "Estimated survivor NIC util (sum by port name)",
-            12,
-            y,
-            12,
-            8,
-            [target(NIC_SURVIVOR, "{{nic}}")],
-            "percent",
-            "Same port name on both HA nodes added together. Green < 70, yellow 70–85, red > 85.",
-            PORT_THRESH,
-        )
-    )
-    pid += 1
-    y += 8
-    panels.append(
-        timeseries(
-            pid,
-            "ifgrp max(rx,tx) % per node",
-            0,
-            y,
-            12,
-            8,
-            [target(IFGRP_MAX_DIR, "{{node}} {{ifgroup}}")],
-            "percent",
-            "Preferred NAS model: LIFs fail over onto the partner ifgrp.",
-        )
-    )
-    pid += 1
-    panels.append(
-        timeseries(
-            pid,
-            "Estimated survivor ifgrp util (sum by ifgroup)",
-            12,
-            y,
-            12,
-            8,
-            [target(IFGRP_SURVIVOR, "{{ifgroup}}")],
-            "percent",
-            "Equal-speed ifgrps named the same on both nodes: will the remaining LAG exceed 100%?",
-            PORT_THRESH,
-        )
-    )
-    pid += 1
-    y += 8
-
-    panels.append(row(pid, "SAN (FC) — upper bound", y))
-    pid += 1
-    y += 1
-    panels.append(
-        timeseries(
-            pid,
-            "FC port util %",
-            0,
-            y,
-            12,
-            8,
-            [target(f"fcp_util_percent{{{SEL}}} * 100", "{{node}} {{port}}")],
-            "percent",
-            "Harvest fcp_util_percent is 0–1. Empty if the cluster has no FC.",
-        )
-    )
-    pid += 1
-    panels.append(
-        timeseries(
-            pid,
-            "Estimated survivor FC util (sum by port name)",
-            12,
-            y,
-            12,
-            8,
-            [target(FCP_SURVIVOR, "{{port}}")],
-            "percent",
-            "Upper bound: hosts with multipath already send I/O to both nodes.",
-            PORT_THRESH,
-        )
-    )
-    pid += 1
-    y += 8
-
-    panels.append(row(pid, "Context — current latency (not in traffic light)", y))
-    pid += 1
-    y += 1
-    panels.append(
-        timeseries(
-            pid,
-            "NFS latency",
-            0,
-            y,
-            12,
-            8,
-            [target(f"node_nfs_latency{{{SEL}}}", "{{node}}")],
             "µs",
-            "If latency is already high, do not plan a takeover even if headroom is green.",
+            "From system:node, so a single unambiguous series per node. If latency is already "
+            "high, do not plan a takeover even when the score is green.",
         )
     )
-    pid += 1
     panels.append(
         timeseries(
-            pid,
-            "FCP read/write latency",
+            next_id(),
+            "iSCSI LIF latency",
             12,
             y,
             12,
             8,
+            [target(f"iscsi_lif_avg_latency{{{SEL}}}", "{{node}} {{lif}}")],
+            "µs",
+            "Per-LIF, since Harvest has no per-port iSCSI counter.",
+        )
+    )
+    y += 8
+
+    panels.append(
+        timeseries(
+            next_id(),
+            "Node operations by protocol",
+            0,
+            y,
+            24,
+            7,
             [
-                target(f"fcp_avg_read_latency{{{SEL}}}", "read {{node}} {{port}}", "A"),
-                target(f"fcp_avg_write_latency{{{SEL}}}", "write {{node}} {{port}}", "B"),
+                target(f"node_nfs_ops{{{SEL}}}", "NFS {{node}}", "A"),
+                target(f"node_cifs_ops{{{SEL}}}", "SMB {{node}}", "B"),
+                target(f"node_iscsi_ops{{{SEL}}}", "iSCSI {{node}}", "C"),
+                target(f"node_nvmf_ops{{{SEL}}}", "NVMe-oF {{node}}", "D"),
             ],
-            "µs",
+            "iops",
+            "Where the work actually is. Useful for judging whether the CPU sum is dominated "
+            "by one node's workload.",
         )
     )
-    pid += 1
 
-    dashboard = {
+    templating = [
+        {
+            "current": {"selected": False, "text": "Prometheus", "value": "Prometheus"},
+            "hide": 2,
+            "includeAll": False,
+            "label": "Data Source",
+            "multi": False,
+            "name": "DS_PROMETHEUS",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": False,
+            "type": "datasource",
+        },
+        query_var(
+            "Datacenter",
+            'label_values(cluster_new_status{system_type!="7mode"}, datacenter)',
+        ),
+        query_var(
+            "Cluster",
+            'label_values(cluster_new_status{system_type!="7mode",datacenter=~"$Datacenter"}, cluster)',
+        ),
+        custom_var("Window", ["15m", "30m", "1h"], "30m", "Percentile window"),
+        # Only a safety net now that ports are filtered by ipspace. The default excludes
+        # nothing extra; e0M is already outside the Cluster ipspace but is not a data port
+        # on any of these platforms.
+        custom_var(
+            "ExcludePorts",
+            ["e0M", "e0M|e0a|e0b", "^$"],
+            "e0M",
+            "Also exclude ports",
+        ),
+        # Thresholds are hidden to keep the header uncluttered. Override per-session with
+        # a URL parameter, e.g. ?var-PcuYellow=175 — see docs/DESIGN.md.
+        custom_var("PcuYellow", ["150", "160", "175", "180"], "160", "PCU yellow", hide=2),
+        custom_var("PcuRed", ["190", "200", "210"], "200", "PCU red", hide=2),
+        custom_var("BusyYellow", ["60", "70", "75"], "70", "CPU busy yellow", hide=2),
+        custom_var("BusyRed", ["80", "85", "90"], "85", "CPU busy red", hide=2),
+        custom_var("PortYellow", ["60", "70", "75"], "70", "Port yellow", hide=2),
+        custom_var("PortRed", ["80", "85", "90"], "85", "Port red", hide=2),
+        custom_var("ConfMin", ["1", "2", "3"], "2", "Min headroom confidence", hide=2),
+    ]
+
+    return {
         "__inputs": [
             {
                 "name": "DS_PROMETHEUS",
@@ -615,9 +1202,21 @@ def build() -> dict:
         ],
         "__requires": [
             {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "8.1.8"},
-            {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"},
+            {
+                "type": "datasource",
+                "id": "prometheus",
+                "name": "Prometheus",
+                "version": "1.0.0",
+            },
             {"type": "panel", "id": "timeseries", "name": "Time series", "version": ""},
             {"type": "panel", "id": "stat", "name": "Stat", "version": ""},
+            {
+                "type": "panel",
+                "id": "state-timeline",
+                "name": "State timeline",
+                "version": "",
+            },
+            {"type": "panel", "id": "table", "name": "Table", "version": ""},
             {"type": "panel", "id": "text", "name": "Text", "version": ""},
         ],
         "annotations": {
@@ -633,7 +1232,11 @@ def build() -> dict:
                 }
             ]
         },
-        "description": "2-node AFF HA takeover headroom: CPU PCU + Ethernet/ifgrp/FC survivor util. Not stock ONTAP: Headroom (no aggregate).",
+        "description": (
+            "ONTAP takeover headroom per HA pair: can the survivor absorb its partner's "
+            "CPU and Ethernet load? Cluster score is the worst pair. All-flash scope, "
+            "so no aggregate or disk headroom."
+        ),
         "editable": True,
         "gnetId": None,
         "graphTooltip": 1,
@@ -653,74 +1256,18 @@ def build() -> dict:
             }
         ],
         "panels": panels,
-        "refresh": "1m",
+        "refresh": "5m",
         "schemaVersion": 30,
         "style": "dark",
         "tags": ["harvest", "ontap", "cdot", "ha", "headroom"],
-        "templating": {
-            "list": [
-                {
-                    "current": {"selected": False, "text": "Prometheus", "value": "Prometheus"},
-                    "hide": 2,
-                    "includeAll": False,
-                    "label": "Data Source",
-                    "multi": False,
-                    "name": "DS_PROMETHEUS",
-                    "options": [],
-                    "query": "prometheus",
-                    "refresh": 1,
-                    "regex": "",
-                    "skipUrlSync": False,
-                    "type": "datasource",
-                },
-                query_var(
-                    "Datacenter",
-                    'label_values(cluster_new_status{system_type!="7mode"}, datacenter)',
-                ),
-                query_var(
-                    "Cluster",
-                    'label_values(cluster_new_status{system_type!="7mode",datacenter=~"$Datacenter"}, cluster)',
-                ),
-                {
-                    "current": {"selected": True, "text": "30m", "value": "30m"},
-                    "hide": 0,
-                    "includeAll": False,
-                    "label": "Percentile window",
-                    "multi": False,
-                    "name": "Window",
-                    "options": [
-                        {"selected": False, "text": "15m", "value": "15m"},
-                        {"selected": True, "text": "30m", "value": "30m"},
-                    ],
-                    "query": "15m,30m",
-                    "skipUrlSync": False,
-                    "type": "custom",
-                },
-                {
-                    "current": {"selected": True, "text": "e0a|e0b|e0M", "value": "e0a|e0b|e0M"},
-                    "hide": 0,
-                    "includeAll": False,
-                    "label": "Exclude NIC regex",
-                    "multi": False,
-                    "name": "ExcludePorts",
-                    "options": [
-                        {"selected": True, "text": "e0a|e0b|e0M", "value": "e0a|e0b|e0M"},
-                        {"selected": False, "text": "e0a|e0b|e0c|e0d|e0M", "value": "e0a|e0b|e0c|e0d|e0M"},
-                    ],
-                    "query": "e0a|e0b|e0M,e0a|e0b|e0c|e0d|e0M",
-                    "skipUrlSync": False,
-                    "type": "custom",
-                },
-            ]
-        },
-        "time": {"from": "now-3h", "to": "now"},
+        "templating": {"list": templating},
+        "time": {"from": "now-6h", "to": "now"},
         "timepicker": {},
         "timezone": "",
         "title": "ONTAP: HA Headroom",
         "uid": "cdot-ha-headroom",
         "version": 1,
     }
-    return dashboard
 
 
 def main() -> None:
@@ -728,7 +1275,14 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     data = build()
     out.write_text(json.dumps(data, indent=1) + "\n")
-    print(f"wrote {out} ({len(data['panels'])} panels)")
+    longest = max(
+        (len(t["expr"]) for p in data["panels"] for t in p.get("targets", [])),
+        default=0,
+    )
+    print(
+        f"wrote {out} ({len(data['panels'])} panels, "
+        f"longest query {longest} chars, FC {'on' if INCLUDE_FC else 'off'})"
+    )
 
 
 if __name__ == "__main__":
