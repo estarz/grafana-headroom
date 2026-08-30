@@ -49,22 +49,30 @@ its scale, labels and source template, plus a query to confirm your TSDB has the
 
 ## Quickstart
 
-```bash
-# 1. Confirm the metrics exist in your TSDB (see docs/METRICS.md for the full check)
-#    Then import the dashboard:
-#    Grafana -> Dashboards -> Import -> upload grafana/dashboards/cmode/ha_headroom.json
+If Harvest and Prometheus are not yet set up, start with [docs/INSTALL.md](docs/INSTALL.md).
+That guide walks through installing Harvest, enabling the right collectors, pointing
+Prometheus at it, and importing the dashboard.
 
-# 2. Regenerate the JSON after changing any query
+If Harvest is already running, the short version:
+
+1. Confirm `Rest` and `RestPerf` collectors are in your poller's `harvest.yml` (the default
+   config uses `Zapi`/`ZapiPerf` only).
+2. Verify the key metrics are present — run the check query in [docs/INSTALL.md §4](docs/INSTALL.md#step-4--verify-the-metrics-are-present).
+3. Import `grafana/dashboards/cmode/ha_headroom.json` into Grafana.
+4. Open the dashboard and check the three first-run panels described in [grafana/README.md](grafana/README.md#first-run-check-these-three-panels).
+
+```bash
+# Regenerate the JSON after changing any query
 python3 grafana/generate_ha_headroom.py
 
-# 3. Parse-check every query offline
+# Parse-check every query offline
 python3 grafana/validate_promql.py /path/to/promtool
 
-# 4. Prove the HA-pair maths is right against synthetic series
+# Prove the HA-pair maths is right against synthetic series
 python3 grafana/test_promql.py /path/to/promtool
 ```
 
-`promtool` ships with Prometheus. Steps 3 and 4 need no running server and no live cluster.
+`promtool` ships with Prometheus. The test scripts need no running server and no live cluster.
 
 ## Repository layout
 
@@ -75,6 +83,7 @@ python3 grafana/test_promql.py /path/to/promtool
 | [grafana/validate_promql.py](grafana/validate_promql.py) | Offline PromQL parse check of the generated JSON |
 | [grafana/test_promql.py](grafana/test_promql.py) | Semantic tests: pair isolation, roll-up, confidence gate, port filtering |
 | [grafana/README.md](grafana/README.md) | Import mechanics, variables, threshold overrides |
+| [docs/INSTALL.md](docs/INSTALL.md) | Step-by-step: Harvest setup, enabling collectors, metric verification, dashboard import |
 | [docs/DESIGN.md](docs/DESIGN.md) | The model, thresholds, and what this deliberately does not do |
 | [docs/METRICS.md](docs/METRICS.md) | Verified metric reference and the PromQL patterns used |
 | [docs/REVIEW.md](docs/REVIEW.md) | Review of the first version: bugs found, corrections made |
