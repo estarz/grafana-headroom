@@ -1,7 +1,7 @@
 # Handover notes
 
 Repository: `github.com/estarz/grafana-headroom`, branch `main`.
-Last updated at commit `0cb000a`.
+Last updated at commit `2ea6bf8`.
 
 ## What this repo is
 
@@ -158,3 +158,5 @@ From [docs/ROADMAP.md](docs/ROADMAP.md):
 | `05ba109` | This file |
 | `88089a7` | `LAB-PLAN.md` for the A220 lab |
 | `0cb000a` | `system:node` partial-aggregation caveat documented |
+| `2d0ae0e` | This file brought up to date for a clean takeover |
+| `2ea6bf8` | Object-form datasource refs — the dashboard would not import on Grafana 12.4+ before this |
