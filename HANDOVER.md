@@ -42,6 +42,15 @@ committed JSON is its output — **never hand-edit the JSON**. Regeneration is b
 `Rest` and `RestPerf` collectors must be enabled. `Rest` provides `node_labels{ha_partner=...}`
 (Harvest ≥ 24.05) and `net_port_status{ipspace=...}`. Without them the pair scores go blank.
 
+**Datasource references must stay in object form.** Every `datasource` in the JSON is
+`{"type": "prometheus", "uid": "${DS_PROMETHEUS}"}`, never the bare `"${DS_PROMETHEUS}"`
+string that stock Harvest dashboards use. Released Grafana does an unguarded `"uid" in ds`
+while applying `__inputs`, which throws on a string and makes the dashboard unimportable
+through the UI on Grafana Cloud and 12.4+. This was hit for real. Upstream has since taught
+the importer to accept both forms, but that is not in a release yet, and the object form
+works on everything from Grafana 8.3 up — so do not "simplify" it back to a string to match
+Harvest's style. Details in [grafana/README.md](grafana/README.md#import-fails-with-a-uid-error).
+
 **Metric scales.** Easy to get wrong:
 
 | Metric | Scale |

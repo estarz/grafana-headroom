@@ -14,8 +14,40 @@ Alternatively copy the JSON into your Harvest tree as
 `grafana/dashboards/cmode/ha_headroom.json` and import with `bin/harvest grafana import`.
 Custom files may need to sit beside Harvest's own dashboards for that to pick them up.
 
-The dashboard targets schemaVersion 30 (Grafana 8) for maximum compatibility. Grafana 9
-through 12 migrate it on import without intervention.
+The dashboard targets schemaVersion 30 for broad compatibility. Grafana 9 through 13
+migrate it on import without intervention.
+
+Datasource references use the object form, `{"type": "prometheus", "uid": "${DS_PROMETHEUS}"}`,
+rather than the bare `"${DS_PROMETHEUS}"` string that older Harvest dashboards use. That sets
+the floor at Grafana 8.3, and it is deliberate — see [Import fails with a `uid` error](#import-fails-with-a-uid-error).
+
+## Import fails with a `uid` error
+
+If Grafana refuses the file with **Dashboard import failed** and one of:
+
+- `cannot use 'in' operator to search for "uid" in "${DS_PROMETHEUS}"` (Chrome, Edge, Firefox)
+- `e is not an Object. (evaluating '"uid" in e')` (Safari)
+
+then Grafana is applying its `__inputs` mapping to a *string* datasource reference and
+crashing on it. The check is unguarded in released Grafana, so a bare-string dashboard
+cannot be imported through the UI on affected versions. It bites Grafana Cloud and
+Grafana 12.4+ in particular; the same file often imports fine on older or self-hosted builds,
+which makes it look intermittent.
+
+This is not specific to this dashboard — every stock Harvest dashboard uses the bare-string
+form and hits it too, which is why Harvest ships its own `bin/harvest grafana import` that
+substitutes the datasource server-side and bypasses the browser entirely. Upstream has
+[since taught the importer to accept both forms](https://github.com/grafana/grafana/blob/main/public/app/features/manage-dashboards/import/utils/inputs.ts),
+but that fix is not in released versions yet.
+
+Using the object form avoids the crash on every Grafana from 8.3 up, so this repo emits it.
+If you hit the error, you are on an old copy of the JSON — pull the current
+[`dashboards/cmode/ha_headroom.json`](dashboards/cmode/ha_headroom.json) and re-import. To
+confirm which form you have, the file should contain no bare-string datasource:
+
+```bash
+grep -c '"datasource": "\${DS_PROMETHEUS}"' dashboards/cmode/ha_headroom.json   # must be 0
+```
 
 ## First run: check these three panels
 

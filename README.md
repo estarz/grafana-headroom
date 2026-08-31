@@ -42,7 +42,7 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the model, the thresholds and the cavea
 | Harvest **Rest** collector enabled | Supplies `node_labels` (HA partner, model) and `net_port_status` (port role, ipspace) |
 | Harvest **RestPerf** or **ZapiPerf** enabled | Supplies `headroom_cpu_*`, `node_cpu_busy`, `nic_util_percent`, `nic_ifgrp_*` |
 | Prometheus or VictoriaMetrics | Both are PromQL-compatible; no recording rules needed |
-| Grafana 8 or newer | The JSON targets schemaVersion 30 and migrates cleanly upward |
+| Grafana **8.3 or newer** | The JSON targets schemaVersion 30 and migrates cleanly upward. 8.3 is the floor because datasource references use the object form, which older releases do not understand |
 
 Every template involved is enabled by default in Harvest, so **no new collectors or
 custom templates are required**. [docs/METRICS.md](docs/METRICS.md) lists each metric with

@@ -224,6 +224,14 @@ the Rest collector is the first thing to check.
 
 ## Troubleshooting
 
+**Import fails with `"uid" in e` / `cannot use 'in' operator to search for "uid"`**
+
+Your copy of the JSON uses the legacy bare-string datasource reference, which crashes
+Grafana's UI importer on Grafana Cloud and 12.4+. Pull the current `ha_headroom.json` from
+this repository and re-import — it uses the object form and imports everywhere from
+Grafana 8.3 up. Full explanation in
+[grafana/README.md](../grafana/README.md#import-fails-with-a-uid-error).
+
 **"No data" on all panels**
 
 - Confirm `bin/harvest status` shows the poller as running.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate grafana/dashboards/cmode/ha_headroom.json.
 
-Produces a Harvest-style Grafana 8 import file (schemaVersion 30) that scores
+Produces a Harvest-style Grafana 8.3+ import file (schemaVersion 30) that scores
 ONTAP takeover risk per HA pair and rolls it up to the cluster as the worst pair.
 
 See ../docs/METRICS.md for the PromQL shapes this emits and why.
@@ -12,7 +12,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-DS = "${DS_PROMETHEUS}"
+# Must be the object form, not the legacy bare "${DS_PROMETHEUS}" string. Grafana's
+# UI import path does `"uid" in datasource` and throws a TypeError on a string, which
+# breaks import on Grafana Cloud and 12.4+. Object refs need Grafana >= 8.3.
+DS = {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+GRAFANA_DS = {"type": "datasource", "uid": "grafana"}
 
 # Harvest label set shared by every query.
 SEL = 'datacenter=~"$Datacenter",cluster=~"$Cluster"'
@@ -1201,7 +1205,7 @@ def build() -> dict:
             }
         ],
         "__requires": [
-            {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "8.1.8"},
+            {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "8.3.0"},
             {
                 "type": "datasource",
                 "id": "prometheus",
@@ -1223,7 +1227,7 @@ def build() -> dict:
             "list": [
                 {
                     "builtIn": 1,
-                    "datasource": "-- Grafana --",
+                    "datasource": GRAFANA_DS,
                     "enable": True,
                     "hide": True,
                     "iconColor": "rgba(0, 211, 255, 1)",
