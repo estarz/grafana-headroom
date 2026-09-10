@@ -16,7 +16,7 @@ is added because a saturated LAG is just as service-affecting as a saturated CPU
 ```mermaid
 flowchart LR
   ontap[ONTAP AFF cluster]
-  harvest[Harvest Rest + RestPerf]
+  harvest["Harvest: config + perf collector<br/>(REST or ZAPI family)"]
   tsdb[Prometheus or VictoriaMetrics]
   dash[Grafana: ONTAP HA Headroom]
   ontap --> harvest --> tsdb --> dash
@@ -162,7 +162,10 @@ score — where its traffic could turn the light red for no reason.
 
 The fix is to filter on **ipspace** via `net_port_status`, which is a first-class ONTAP
 concept present in both the REST and ZAPI Harvest templates and stable across platforms.
-`ExcludePorts` survives as an extra name-based safety net, defaulting to `e0M`.
+`ExcludePorts` survives as an extra name-based safety net, defaulting to `e0M`. The
+dropdown also carries per-model presets for A70/A90, A30, and A220/older FAS; see
+[grafana/README.md](../grafana/README.md#customizing-port-exclusions) for how to customize
+it without editing files.
 
 ## From utilization to one traffic light
 
@@ -201,7 +204,7 @@ them per session with a URL parameter:
 | `PortYellow` / `PortRed` | 70 / 85 | Estimated survivor port utilization |
 | `ConfMin` | 2 | Minimum headroom confidence before PCU is trusted |
 | `Window` | 30m | Percentile window |
-| `ExcludePorts` | `e0M` | Extra port-name exclusions on top of the ipspace filter |
+| `ExcludePorts` | `e0M` | Extra port-name exclusions on top of the ipspace filter. Presets for A70/A90, A30, A220. Custom values can be typed directly into the dropdown. |
 
 To make a change permanent, edit the defaults in `generate_ha_headroom.py` and regenerate.
 

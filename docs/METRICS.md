@@ -10,7 +10,10 @@ Harvest labels used throughout: `datacenter`, `cluster`, `node`, plus `nic`, `if
 
 ## Verified metric reference
 
-### Config collector — `Rest`, poll interval 3m
+### Config collector — `Rest` or `Zapi`, poll interval 3m
+
+Template paths below are the REST ones. The ZAPI templates under `conf/zapi/cdot/` export
+the same metric names and labels, so either collector satisfies the dashboard.
 
 | Metric | Scale | Labels | Template |
 | --- | --- | --- | --- |
@@ -52,6 +55,11 @@ Both `node.yaml` and `netport.yaml` are enabled by default in `conf/rest/default
 - **`node_cpu_busy` comes from `system_node.yaml`, whose `instance_keys` is `[node]` alone.**
   No Harvest template, in any collector or ONTAP version, puts a partner label on a perf
   metric.
+- **At confidence 1, `headroom_cpu_optimal_point_utilization` is a flat `70`.** That is
+  ONTAP's seed value, not a measurement, so any PCU derived from it is meaningless — which
+  is exactly why the dashboard gates on confidence before trusting PCU. Observed on both
+  nodes of the A220 lab across a full week. `headroom_cpu_current_ops` is also near-identical
+  across nodes there, so treat the `_ops` counters as unreliable until confidence exceeds 1.
 - **`speed` on `nic_util_percent` does not exist** — it is an instance label on `nic_labels`,
   and the plugin rewrites it to bits per second (`"10000000000"`, not `"10000M"`).
 - **`node_nfs_latency` is ambiguous.** Four templates (`nfsv3_node`, `nfsv4_node`,
@@ -102,8 +110,8 @@ Expect a non-zero count for each name. If any is missing:
 
 | Missing | Cause and consequence |
 | --- | --- |
-| `node_labels` or no `ha_partner` label on it | Rest config collector disabled, or Harvest older than 24.05. All pair-aware panels go blank. Check the **HA partner coverage** panel. |
-| `net_port_status` | Rest collector disabled. Port filtering falls back to the `ExcludePorts` name regex — verify that regex is right for your platform. |
+| `node_labels` or no `ha_partner` label on it | No config collector, or Harvest older than 24.05. `Rest` and `Zapi` both supply `ha_partner` on 24.05+. All pair-aware panels go blank. Check the **HA partner coverage** panel. |
+| `net_port_status` | No config collector. Port filtering falls back to the `ExcludePorts` name regex — verify that regex is right for your platform. |
 | `headroom_cpu_*` | `resource_headroom_cpu` not collected. The dashboard falls back to `node_cpu_busy` automatically. |
 | `nic_ifgrp_*` | No ifgrps configured. Ethernet scoring still works through `nic_util_percent`. |
 

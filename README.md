@@ -39,8 +39,8 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the model, the thresholds and the cavea
 | --- | --- |
 | Harvest **24.05 or newer** | Earlier releases do not export the `ha_partner` label |
 | Harvest **25.11 or newer** recommended | Adds `allow_partial_aggregation`, without which `node_cpu_busy` blanks for *every* node while any one node is down — see [docs/METRICS.md](docs/METRICS.md#behaviour-during-a-takeover) |
-| Harvest **Rest** collector enabled | Supplies `node_labels` (HA partner, model) and `net_port_status` (port role, ipspace) |
-| Harvest **RestPerf** or **ZapiPerf** enabled | Supplies `headroom_cpu_*`, `node_cpu_busy`, `nic_util_percent`, `nic_ifgrp_*` |
+| A config collector — **`Rest` or `Zapi`** | Supplies `node_labels` (HA partner, model) and `net_port_status` (port role, ipspace) |
+| A perf collector — **`RestPerf` or `ZapiPerf`** | Supplies `headroom_cpu_*`, `node_cpu_busy`, `nic_util_percent`, `nic_ifgrp_*` |
 | Prometheus or VictoriaMetrics | Both are PromQL-compatible; no recording rules needed |
 | Grafana **8.3 or newer** | The JSON targets schemaVersion 30 and migrates cleanly upward. 8.3 is the floor because datasource references use the object form, which older releases do not understand |
 
@@ -56,8 +56,8 @@ Prometheus at it, and importing the dashboard.
 
 If Harvest is already running, the short version:
 
-1. Confirm `Rest` and `RestPerf` collectors are in your poller's `harvest.yml` (the default
-   config uses `Zapi`/`ZapiPerf` only).
+1. Confirm your poller has a config collector and a perf collector in `harvest.yml`. The
+   shipped default gives you both, and either the REST or the ZAPI family works.
 2. Verify the key metrics are present — run the check query in [docs/INSTALL.md §4](docs/INSTALL.md#step-4--verify-the-metrics-are-present).
 3. Import `grafana/dashboards/cmode/ha_headroom.json` into Grafana.
 4. Open the dashboard and check the three first-run panels described in [grafana/README.md](grafana/README.md#first-run-check-these-three-panels).

@@ -43,8 +43,8 @@ Harvest does not require root. A dedicated service account is recommended.
 ## Step 2 — Create a poller for your cluster
 
 Harvest is configured in `harvest.yml`. Open it in a text editor and add your cluster
-under `Pollers`. You also need to add `Rest` and `RestPerf` to the collector list, since
-the default ships with `Zapi` and `ZapiPerf` only.
+under `Pollers`. The shipped default collector list already covers everything this
+dashboard needs, so in most cases you only add the poller.
 
 A minimal configuration for one cluster:
 
@@ -56,7 +56,7 @@ Exporters:
     port: 12990
 
 Defaults:
-  # Rest and RestPerf are required. Ems is optional but harmless.
+  # A config collector and a perf collector. Ems is optional but harmless.
   collectors:
     - Rest
     - RestPerf
@@ -73,8 +73,29 @@ Pollers:
     password: your-password
 ```
 
-If you already have a `Zapi` / `ZapiPerf` poller and do not want to change the global
-`Defaults`, add the collectors directly to the individual poller instead:
+### Which collectors this dashboard needs
+
+Two, one of each kind. **Either the REST or the ZAPI family works** — Harvest has shipped
+matching templates for both since 22.11, exporting identical metric names:
+
+| Kind | Use either | What it provides for this dashboard |
+| --- | --- | --- |
+| Config | `Rest` **or** `Zapi` | `node_labels` (HA partner, model), `net_port_status` (ipspace, role) |
+| Perf | `RestPerf` **or** `ZapiPerf` | `headroom_cpu_*`, `node_cpu_busy`, `nic_util_percent`, `nic_ifgrp_*` |
+
+If you list both families, Harvest does not collect anything twice. It resolves the overlap
+by **the order the collectors appear in your poller**, then falls through to the next
+collector for objects the first one does not support. So a list beginning `Zapi, ZapiPerf,
+..., Rest, RestPerf` means ZAPI serves every object this dashboard uses and the REST
+collectors only pick up REST-only objects. That is a perfectly good configuration, and it is
+what the A220 validation lab runs — see [LAB-PLAN.md](../LAB-PLAN.md#what-the-first-lab-run-found).
+
+Put `Rest` before `Zapi` if you want REST to win. That is the better long-term choice:
+from ONTAP 9.14.1, ZAPIs are automatically disabled 30 days after an upgrade if nothing
+uses them. Harvest handles the switch on its own if the cluster stops speaking ZAPI, so
+this is a preference rather than an urgent migration.
+
+To set the collectors per poller instead of globally:
 
 ```yaml
 Pollers:
@@ -89,13 +110,6 @@ Pollers:
       - RestPerf
       - Ems
 ```
-
-Both `Rest` and `RestPerf` are required:
-
-| Collector | What it provides for this dashboard |
-| --- | --- |
-| `Rest` | `node_labels` (HA partner, model), `net_port_status` (ipspace, role) |
-| `RestPerf` | `headroom_cpu_*`, `node_cpu_busy`, `nic_util_percent`, `nic_ifgrp_*` |
 
 ### ONTAP user permissions
 
@@ -171,10 +185,10 @@ Expected result — a non-zero count for each name:
 
 | Metric | If missing |
 | --- | --- |
-| `node_labels` | Rest collector not running — check `bin/harvest status` |
-| `node_labels` has no `ha_partner` label | Harvest older than 24.05, or ZAPI-only poller |
-| `net_port_status` | Rest collector not running |
-| `headroom_cpu_*` | RestPerf not running, or the template was disabled |
+| `node_labels` | No config collector running — check `bin/harvest status` |
+| `node_labels` has no `ha_partner` label | Harvest older than 24.05. Both `Rest` and `Zapi` supply this label on 24.05+ |
+| `net_port_status` | No config collector running |
+| `headroom_cpu_*` | No perf collector running, or the template was disabled |
 | `nic_ifgrp_*` | No ifgrps on the cluster (scoring falls back to physical NICs — acceptable) |
 
 Also confirm the `ha_partner` label exists:
@@ -183,8 +197,8 @@ Also confirm the `ha_partner` label exists:
 count(node_labels{ha_partner!=""}) by (cluster, node, ha_partner)
 ```
 
-This should return one row per node showing its partner. An empty result means the Rest
-collector is missing or the Harvest version is too old.
+This should return one row per node showing its partner. An empty result means no config
+collector is running, or the Harvest version is too old.
 
 ---
 
@@ -213,12 +227,12 @@ three panels before trusting the traffic light:
 
 | Panel | Expected | If not |
 | --- | --- | --- |
-| **HA partner coverage** | `1.0` — all nodes paired | Rest collector missing or Harvest < 24.05. Pair scores will be incomplete or blank. |
+| **HA partner coverage** | `1.0` — all nodes paired | No config collector running, or Harvest < 24.05. Pair scores will be incomplete or blank. |
 | **Ethernet ports in scope** | Your data ports only — no cluster ports | Adjust `ExcludePorts`. Cluster ports in this table would inflate the network score. |
 | **Headroom confidence (worst node)** | Any value | A value of 0 or 1 is normal and simply means the dashboard uses `node_cpu_busy` instead of PCU. It is not a fault. |
 
 If the **HA pairs, models and partner health** table shows an empty `ha_partner` column,
-the Rest collector is the first thing to check.
+the config collector is the first thing to check.
 
 ---
 
@@ -248,14 +262,15 @@ Grafana 8.3 up. Full explanation in
 
 **`HA partner coverage` shows less than 1.0**
 
-The Rest config collector is not running, or Harvest is older than 24.05. The dashboard
-falls back to the `node_cpu_busy` fallback model, which works correctly for 2-node clusters
-but produces no per-pair breakdown on larger ones. Upgrade Harvest and add `Rest` to the
-collectors list to fix it.
+No config collector is running, or Harvest is older than 24.05. The dashboard falls back to
+the `node_cpu_busy` fallback model, which works correctly for 2-node clusters but produces
+no per-pair breakdown on larger ones. Upgrade Harvest and make sure `Rest` or `Zapi` is in
+the collectors list to fix it.
 
 **`net_port_status` is missing / Ethernet ports in scope table is empty**
 
-Same cause: Rest collector not running. The dashboard falls back to filtering ports by the
-`ExcludePorts` name regex. For A30/A70/A90 that regex must match the actual cluster ports
-(`e4a|e4b` for A30, `e1a|e7a` for A70/A90) or data ports will be excluded instead.
-Enabling the Rest collector is strongly preferred.
+Same cause: no config collector running. The dashboard falls back to filtering ports by the
+`ExcludePorts` name regex. Use the dropdown preset that matches your platform (`A30`,
+`A70 / A90`, `A220 / older FAS`) so the right cluster ports are excluded. Enabling a
+config collector is strongly preferred — the `ipspace` filter then does the job
+automatically for any platform.

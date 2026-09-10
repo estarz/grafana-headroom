@@ -163,8 +163,12 @@ Pollers:
       - prometheus
 ```
 
-Both `Rest` and `RestPerf` are required. Harvest's shipped default uses `Zapi`/`ZapiPerf`,
-which will not produce `node_labels{ha_partner=...}` or `net_port_status`.
+A config collector and a perf collector are required, but **either the REST or the ZAPI
+family works** — Harvest ships matching templates that export identical metric names. The
+list above picks REST because ONTAP 9.14.1+ disables unused ZAPIs 30 days after an upgrade,
+so REST is the better long-term default. Harvest's shipped `Defaults` enables all of
+`Zapi, ZapiPerf, Ems, Rest, RestPerf`, which also works fine and is what the validated lab
+actually ran — see [What the first lab run found](#what-the-first-lab-run-found).
 
 ```bash
 bin/harvest start
@@ -409,34 +413,69 @@ Confirm the dashboard returns to its pre-test state within one or two poll cycle
 
 ---
 
+## What the first lab run found
+
+First run against real hardware, after a week of collection on the `orion` A220 pair.
+All 33 panel queries were executed against Prometheus with default variables: **31 returned
+data, 0 errored.** Phases 0–4 pass. The takeover phase (TC-11 to TC-14) is still to do.
+
+Three findings worth carrying forward:
+
+**Either collector family works.** This lab runs Harvest's shipped default, which lists
+`Zapi, ZapiPerf, Ems, Rest, RestPerf`. Because Harvest resolves overlap by the order
+collectors appear, ZAPI serves every object this dashboard uses and `RestPerf` produces
+nothing at all. Everything still works, including `ha_partner` and `net_port_status`.
+Earlier drafts of these docs claimed `Rest`/`RestPerf` were mandatory. That was wrong, and
+the requirement has been corrected everywhere.
+
+**The confidence fallback is provably live.** With confidence pinned at 1, the cluster
+score of 0.2053 equals combined CPU busy 14.37 ÷ `BusyYellow` 70 — the busy path. Forcing
+`?var-ConfMin=1` moves it to 0.1458, which is combined PCU 23.34 ÷ `PcuYellow` 160 — the PCU
+path. The two paths produce visibly different numbers, so the `(PCU and confidence_ok) or
+busy` branch is doing real work rather than silently collapsing to one side.
+
+**The empty panels are both correct.** "Available CPU ops" is gated on confidence > 1, and
+`max_over_time(...[7d])` confirms confidence never left 1 all week. "iSCSI LIF latency" is
+empty because the lab has no iSCSI at all — zero `iscsi_lif_*` series exist.
+
+---
+
 ## Results
+
+Phase 0–4 results below were captured by querying Prometheus directly through the Grafana
+datasource proxy, running each panel's own query with the dashboard's default variables.
 
 | Test | Result | Notes |
 | --- | --- | --- |
-| TC-01 HA partner coverage | | |
-| TC-02 Pair table populated | | |
-| TC-03 Both pair directions | | |
-| TC-04 Cluster ports excluded | | |
-| TC-05 Interconnect cannot score | | |
-| TC-06 Baseline green | | |
-| TC-07 Force yellow | | |
-| TC-08 Force red | | |
-| TC-09 Confidence reads 1 | | |
-| TC-10 Model switches on confidence | | |
-| TC-11 Inventory survives takeover | | |
-| TC-12 `node_cpu_busy` during takeover | | Harvest version: |
-| TC-13 Dashboard during takeover | | |
-| TC-14 Numbers match ONTAP | | |
+| TC-01 HA partner coverage | **Pass** | `1.0`. `ha_partner` present on both nodes, supplied by the **Zapi** collector |
+| TC-02 Pair table populated | **Pass** | 2 rows, model `AFF-A220`, `healthy` and `partner_healthy` both true |
+| TC-03 Both pair directions | **Pass** | `orion-01 absorbs orion-02` and the reverse, both 0.2053 |
+| TC-04 Cluster ports excluded | **Pass** | 24 ports total → 4 dropped as `ipspace="Cluster"`, 2 as `e0M`, 18 in scope, 14 of them up |
+| TC-05 Interconnect cannot score | **Pass** | NIC panels return 4 series (`e0c`/`e0d` × 2 nodes); `e0a`/`e0b` absent despite running *hotter* (0.021–0.023) than `e0c` (0.003) |
+| TC-06 Baseline green | **Pass** | Risk index 0.2053, well below 1.0 |
+| TC-07 Force yellow | **Pass** | `?var-BusyYellow=5&var-BusyRed=50` → 1.2082, inside the yellow band |
+| TC-08 Force red | **Pass** | `?var-BusyYellow=1&var-BusyRed=2` → 14.3686, above the red line |
+| TC-09 Confidence reads 1 | **Pass** | 1 on both nodes; `max_over_time([7d])` also 1, so never higher all week |
+| TC-10 Model switches on confidence | **Pass** | Default 0.2053 (busy path) vs `?var-ConfMin=1` 0.1458 (PCU path) |
+| TC-11 Inventory survives takeover | Not yet run | |
+| TC-12 `node_cpu_busy` during takeover | Not yet run | Harvest 26.08.0 ships `allow_partial_aggregation: true` in `conf/zapiperf/cdot/9.15.1/system_node.yaml`, so the survivor is **expected to keep reporting** |
+| TC-13 Dashboard during takeover | Not yet run | |
+| TC-14 Numbers match ONTAP | Not yet run | |
 
 ### Environment recorded
 
 | Item | Value |
 | --- | --- |
-| ONTAP version | |
-| Harvest version | |
-| Prometheus version | |
-| Grafana version | |
+| Cluster / datacenter | `orion` / `SWELAB`, nodes `orion-01` and `orion-02` |
+| Platform | AFF-A220 pair |
+| ONTAP version | 9.19.1 |
+| Harvest version | 26.08.0 |
+| Collectors actually serving data | `Zapi` and `ZapiPerf` (`RestPerf` idle — ordering, see above) |
+| Prometheus version | 3.14.0 |
+| Grafana version | 12.4.9 |
 | UTA2 personality (`ucadmin show`) | |
-| Cluster ports | |
-| Data ports | |
+| Cluster ports | `e0a`, `e0b` — confirmed via `ipspace="Cluster"`, 4 series across the pair |
+| Data ports | 18 in scope, 14 up; `e0M` excluded by the default `ExcludePorts` |
 | Switchless? | |
+
+Two rows are left blank because they need an ONTAP CLI session rather than metrics.

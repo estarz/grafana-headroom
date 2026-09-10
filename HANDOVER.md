@@ -12,9 +12,14 @@ clusters via per-HA-pair scoring.
 
 ## Current state
 
-The dashboard is complete and tested offline. **It has not yet been run against real
-hardware.** The next milestone is lab validation on a 2-node AFF A220 — see
-[LAB-PLAN.md](LAB-PLAN.md) and the open questions below.
+The dashboard is complete and **has now been validated against real hardware** — a 2-node
+AFF A220 (`orion`, ONTAP 9.19.1) running Harvest 26.08, Prometheus 3.14 and Grafana 12.4.9.
+All 33 panel queries were run against live data: 31 returned data, 0 errored, and the two
+empty ones are correct (see below). LAB-PLAN phases 0–4 pass.
+
+**The takeover test is the remaining milestone.** TC-11 to TC-14 in
+[LAB-PLAN.md](LAB-PLAN.md) have not been run, and the open questions below are all about
+what happens mid-takeover.
 
 The generator is [grafana/generate_ha_headroom.py](grafana/generate_ha_headroom.py); the
 committed JSON is its output — **never hand-edit the JSON**. Regeneration is byte-stable, so
@@ -38,9 +43,16 @@ committed JSON is its output — **never hand-edit the JSON**. Regeneration is b
 
 ## Key technical constraints — read before changing anything
 
-**Harvest collectors.** Harvest's default `harvest.yml` uses `Zapi`/`ZapiPerf` only. Both
-`Rest` and `RestPerf` collectors must be enabled. `Rest` provides `node_labels{ha_partner=...}`
-(Harvest ≥ 24.05) and `net_port_status{ipspace=...}`. Without them the pair scores go blank.
+**Harvest collectors.** You need a config collector and a perf collector, and **either the
+REST or the ZAPI family works** — Harvest ships matching templates exporting identical
+metric names. The config collector provides `node_labels{ha_partner=...}` (Harvest ≥ 24.05)
+and `net_port_status{ipspace=...}`; without one, pair scores go blank.
+
+Earlier versions of these docs insisted on `Rest`/`RestPerf`. That was wrong and is now
+corrected. The A220 lab runs Harvest's shipped default (`Zapi, ZapiPerf, Ems, Rest,
+RestPerf`), and because Harvest resolves overlapping objects by the order collectors are
+listed, ZAPI serves everything this dashboard uses while `RestPerf` sits idle. It all works.
+Do not reintroduce a REST-only requirement.
 
 **Datasource references must stay in object form.** Every `datasource` in the JSON is
 `{"type": "prometheus", "uid": "${DS_PROMETHEUS}"}`, never the bare `"${DS_PROMETHEUS}"`
@@ -93,6 +105,12 @@ worst during a real outage. Recommend Harvest 25.11+.
   `/d/cdot-ha-headroom/?var-BusyYellow=5&var-BusyRed=10`. This is the practical way to drive
   the traffic light through yellow and red on an idle system without generating load.
 - Visible variables: `Datacenter`, `Cluster`, `Window` (30m), `ExcludePorts` (`e0M`).
+  `ExcludePorts` ships with presets for A70/A90 (`e0M|e1a|e7a`), A30 (`e0M|e4a|e4b`),
+  A220/older FAS (`e0M|e0a|e0b`), and a `None` entry (`^$`). `allowCustomValue` is set so
+  users can type an arbitrary regex directly into the dropdown without editing anything.
+  **When adding a preset**, display labels must not contain commas — Grafana splits the
+  CSV on commas before splitting on ` : `, so `A70, A90` would silently corrupt the list.
+  Use ` / ` as a separator instead.
 - Hidden variables: `PcuYellow` 160, `PcuRed` 200, `BusyYellow` 70, `BusyRed` 85,
   `PortYellow` 70, `PortRed` 85, `ConfMin` 2.
 - `?var-ConfMin=1` forces the PCU path when confidence is stuck at 1 — the only practical way
@@ -110,11 +128,29 @@ No server or cluster needed. `promtool` ships with Prometheus — grab a release
 [prometheus/prometheus](https://github.com/prometheus/prometheus/releases) if it is not
 already on the box.
 
+## Answered by the first lab run
+
+Recorded in [LAB-PLAN.md](LAB-PLAN.md#what-the-first-lab-run-found) with the evidence.
+
+- **The ipspace port filter works, and is not coincidentally agreeing with the old regex.**
+  On the A220, `e0a`/`e0b` are cluster ports and were correctly dropped via
+  `ipspace="Cluster"`. They were running *hotter* than the data ports at the time, so had
+  the filter failed it would have skewed the score upward and been obvious.
+- **The confidence fallback switches for real.** Default `ConfMin=2` scores off CPU busy
+  (0.2053 = 14.37 ÷ 70); `?var-ConfMin=1` scores off PCU (0.1458 = 23.34 ÷ 160).
+- **Threshold overrides drive the full colour range** without any load: yellow at
+  `?var-BusyYellow=5&var-BusyRed=50`, red at `?var-BusyYellow=1&var-BusyRed=2`.
+- **A220 runs ONTAP 9.19.1**, settling the "maximum ONTAP release" question.
+- **Harvest 26.08 ships `allow_partial_aggregation: true`** in
+  `conf/zapiperf/cdot/9.15.1/system_node.yaml`, so on this lab the surviving node is
+  expected to keep reporting `node_cpu_busy` during takeover. Still needs confirming under
+  an actual takeover — TC-12.
+
 ## Open questions awaiting lab validation
 
 These are genuinely unknown, not merely unverified. Do not guess at them in documentation —
 they are cheap to answer empirically and [LAB-PLAN.md](LAB-PLAN.md) walks through capturing
-each one.
+each one. All of them now require an actual takeover to answer.
 
 1. **Does the taken-over node's `headroom_cpu` row disappear, or persist stale?**
    `headroom_cpu` is not an aggregated table so the survivor is fine, but nothing documents
@@ -123,21 +159,17 @@ each one.
    series vanishes (the pair sum needs both nodes) and panels read "No data". If confirmed,
    consider whether an explicit "takeover in progress" state would be better than a blank
    panel. LAB-PLAN TC-13.
-3. **Does `node_cpu_busy` blank for the surviving node too?** Depends on Harvest version and
-   whether `allow_partial_aggregation` is in play. LAB-PLAN TC-12.
-4. **A220 maximum ONTAP release.** Evidence is indirect — the A220 is absent from NetApp's
-   end-of-support list through 9.19.1, but Hardware Universe was not directly checked.
-5. **Does the ipspace port filter behave on a platform where the old name regex would also
-   have worked?** A220 cluster ports are `e0a`/`e0b`, exactly what the old buggy regex
-   assumed, so the lab is a good test that the new mechanism is doing the work rather than
-   coincidentally agreeing. LAB-PLAN TC-04.
+3. **Does `node_cpu_busy` blank for the surviving node too?** The lab has
+   `allow_partial_aggregation: true` enabled, so it should not — but that is an inference
+   from the template, not an observation. LAB-PLAN TC-12.
 
 ## Deferred work worth picking up next
 
 From [docs/ROADMAP.md](docs/ROADMAP.md):
 
-1. **Act on the lab results** — fold answers to the open questions above into
-   `docs/METRICS.md` and `docs/DESIGN.md`, and fill in the LAB-PLAN results table.
+1. **Run the takeover test** — TC-11 to TC-14 are the only unvalidated part of the model,
+   and they cover the exact scenario the dashboard exists to predict. Fold the answers into
+   `docs/METRICS.md` and `docs/DESIGN.md` and finish the LAB-PLAN results table.
 2. **Fleet overview table** — one row per cluster sorted worst-first, for watching multiple
    clusters at once.
 3. **Grafana/Prometheus alert rules** — alert on risk index crossing 1 or 2, sustained over

@@ -103,14 +103,19 @@ remains as a name-based safety net, now defaulting to `e0M`.
 
 ### 8. "No new Harvest collectors" was true but incomplete — documented
 
-Correct that no custom templates are needed, but the original docs implied RestPerf alone
-was sufficient. The **Rest config collector** is also required, for `node_labels` (HA partner
+Correct that no custom templates are needed, but the original docs implied a perf collector
+alone was sufficient. A **config collector** is also required, for `node_labels` (HA partner
 and model) and `net_port_status` (ipspace and role). Both `node.yaml` and `netport.yaml` are
-enabled by default in `conf/rest/default.yaml`, so this is a matter of confirming the
-collector runs, not of writing anything.
+enabled by default, so this is a matter of confirming the collector runs, not of writing
+anything.
 
 Requirements are now stated explicitly in the README, including the Harvest 24.05 floor for
 `ha_partner`.
+
+> **Later correction.** The fix for this initially over-specified the requirement as `Rest`
+> and `RestPerf`. Either the REST or the ZAPI collector family works, and the A220 lab
+> proved it by running entirely on ZAPI. See
+> [LAB-PLAN.md](../LAB-PLAN.md#what-the-first-lab-run-found).
 
 ### 9. HA-pair support was parked as possibly infeasible — implemented
 
