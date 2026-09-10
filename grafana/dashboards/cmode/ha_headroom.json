@@ -2693,6 +2693,7 @@
     "type": "query"
    },
    {
+    "allowCustomValue": true,
     "current": {
      "selected": true,
      "text": "30m",
@@ -2725,6 +2726,7 @@
     "type": "custom"
    },
    {
+    "allowCustomValue": true,
     "current": {
      "selected": true,
      "text": "e0M",
@@ -2743,20 +2745,31 @@
      },
      {
       "selected": false,
-      "text": "e0M|e0a|e0b",
+      "text": "A70 / A90 (also e1a + e7a)",
+      "value": "e0M|e1a|e7a"
+     },
+     {
+      "selected": false,
+      "text": "A30 (also e4a + e4b)",
+      "value": "e0M|e4a|e4b"
+     },
+     {
+      "selected": false,
+      "text": "A220 / older FAS (also e0a + e0b)",
       "value": "e0M|e0a|e0b"
      },
      {
       "selected": false,
-      "text": "^$",
+      "text": "None",
       "value": "^$"
      }
     ],
-    "query": "e0M,e0M|e0a|e0b,^$",
+    "query": "e0M,A70 / A90 (also e1a + e7a) : e0M|e1a|e7a,A30 (also e4a + e4b) : e0M|e4a|e4b,A220 / older FAS (also e0a + e0b) : e0M|e0a|e0b,None : ^$",
     "skipUrlSync": false,
     "type": "custom"
    },
    {
+    "allowCustomValue": true,
     "current": {
      "selected": true,
      "text": "160",
@@ -2794,6 +2807,7 @@
     "type": "custom"
    },
    {
+    "allowCustomValue": true,
     "current": {
      "selected": true,
      "text": "200",
@@ -2826,6 +2840,7 @@
     "type": "custom"
    },
    {
+    "allowCustomValue": true,
     "current": {
      "selected": true,
      "text": "70",
@@ -2858,6 +2873,7 @@
     "type": "custom"
    },
    {
+    "allowCustomValue": true,
     "current": {
      "selected": true,
      "text": "85",
@@ -2890,6 +2906,7 @@
     "type": "custom"
    },
    {
+    "allowCustomValue": true,
     "current": {
      "selected": true,
      "text": "70",
@@ -2922,6 +2939,7 @@
     "type": "custom"
    },
    {
+    "allowCustomValue": true,
     "current": {
      "selected": true,
      "text": "85",
@@ -2954,6 +2972,7 @@
     "type": "custom"
    },
    {
+    "allowCustomValue": true,
     "current": {
      "selected": true,
      "text": "2",

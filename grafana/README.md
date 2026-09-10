@@ -55,7 +55,7 @@ Before trusting the traffic light, confirm the model has what it needs.
 
 | Panel | Expected | If not |
 | --- | --- | --- |
-| **HA partner coverage** | `1.0` — all nodes paired | Enable the Harvest **Rest** collector, and confirm Harvest is 24.05 or newer. Below 1.0, the pair scores are incomplete. |
+| **HA partner coverage** | `1.0` — all nodes paired | Enable a Harvest config collector (`Rest` **or** `Zapi`), and confirm Harvest is 24.05 or newer. Below 1.0, the pair scores are incomplete. |
 | **Ethernet ports in scope** | Your data ports, no cluster ports | Adjust `ExcludePorts`. Cluster ports appearing here means the `ipspace` filter did not work. |
 | **Headroom confidence (worst node)** | Any value | 0 or 1 is normal and simply means the score uses `node_cpu_busy` instead of PCU. Not a fault. |
 
@@ -79,7 +79,7 @@ Visible in the dashboard header:
 | --- | --- | --- |
 | `Datacenter` / `Cluster` | all | Same as other Harvest cDOT dashboards |
 | `Window` | `30m` | Percentile window for the traffic-light inputs |
-| `ExcludePorts` | `e0M` | Extra port-name exclusions on top of the `ipspace != "Cluster"` filter |
+| `ExcludePorts` | `e0M` | Extra port-name exclusions on top of the `ipspace != "Cluster"` filter. See below. |
 
 Thresholds are hidden to keep the header uncluttered. Override per session with a URL
 parameter, or change the defaults in `generate_ha_headroom.py` to make it permanent:
@@ -94,6 +94,42 @@ parameter, or change the defaults in `generate_ha_headroom.py` to make it perman
 | `BusyYellow` / `BusyRed` | 70 / 85 | Combined `node_cpu_busy` |
 | `PortYellow` / `PortRed` | 70 / 85 | Estimated survivor port utilization |
 | `ConfMin` | 2 | Minimum headroom confidence before PCU is trusted over CPU busy |
+
+## Customizing port exclusions
+
+`ExcludePorts` is a name regex applied on top of the primary `ipspace != "Cluster"` filter.
+Its main job is to exclude management ports (`e0M`) and to act as a fallback if
+`net_port_status` is absent (no config collector), in which case the regex is the only
+thing keeping cluster ports out of the network score.
+
+The dropdown ships with presets for common platforms:
+
+| Preset | Value sent to queries | Cluster ports covered |
+| --- | --- | --- |
+| `e0M` (default) | `e0M` | — (relies on ipspace filter) |
+| `A70 / A90 (also e1a + e7a)` | `e0M\|e1a\|e7a` | A70, A90 |
+| `A30 (also e4a + e4b)` | `e0M\|e4a\|e4b` | A30 |
+| `A220 / older FAS (also e0a + e0b)` | `e0M\|e0a\|e0b` | A220, older FAS/AFF |
+| `None` | `^$` | nothing extra excluded |
+
+**Three ways to change it:**
+
+1. **Type a regex directly into the dropdown** (per-session, nothing to edit). Grafana's
+   "Allow custom values" option is enabled, so you can type e.g. `e0M|e2a|e2b` and press
+   Enter to make it the selected value for that session.
+2. **URL parameter** (shareable link): `?var-ExcludePorts=e0M%7Ce2a%7Ce2b`. Useful for
+   linking colleagues to the right view for their platform.
+3. **Edit the generator and regenerate** (permanent): add a new tuple to the
+   `ExcludePorts` list in `generate_ha_headroom.py` and run `python3
+   generate_ha_headroom.py`. Display labels must not contain commas.
+
+**Two caveats:**
+
+- Picking the wrong preset excludes real data ports and silently *under*-reports network
+  risk. Selecting "A30" on an A70 would drop `e4a`/`e4b`, which are data ports there.
+- A mixed-model cluster (e.g. one A70 node and one A90 node with different cluster ports)
+  has no single correct preset. In that case the `ipspace` filter handles the exclusion
+  correctly on its own — leave `ExcludePorts` at the default `e0M`.
 
 ## Generator options
 

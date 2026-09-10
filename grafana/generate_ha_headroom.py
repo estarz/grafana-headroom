@@ -585,19 +585,54 @@ def query_var(name: str, query: str, label=None) -> dict:
 
 
 def custom_var(
-    name: str, values: list[str], default: str, label: str, hide: int = 0
+    name: str,
+    values: list,  # str | (display: str, value: str)
+    default: str,
+    label: str,
+    hide: int = 0,
 ) -> dict:
+    """Build a Grafana custom (CSV) variable.
+
+    Each entry in *values* may be either a plain string (display = value) or a
+    ``(display, value)`` tuple, which Grafana renders as ``display : value`` in
+    the CSV query string.  Display labels must not contain commas — Grafana
+    parses the CSV before splitting on `` : ``, so a comma in the label would
+    silently break the option list.
+
+    ``allowCustomValue`` is emitted as True (the schema default) to explicitly
+    document that users may type an arbitrary value into the dropdown — e.g.
+    ``e0M|e2a|e2b`` for a platform not covered by the presets.
+    """
+    items: list[tuple[str, str]] = []
+    for v in values:
+        if isinstance(v, tuple):
+            disp, val = v
+        else:
+            disp = val = v
+        assert "," not in disp, (
+            f"custom_var '{name}': display label {disp!r} contains a comma, "
+            "which would corrupt Grafana's CSV parser"
+        )
+        items.append((disp, val))
+
+    # Build the current "selected" entry using the display text of the default value.
+    default_disp = next((d for d, v in items if v == default), default)
+
+    def _query_entry(disp: str, val: str) -> str:
+        return val if disp == val else f"{disp} : {val}"
+
     return {
-        "current": {"selected": True, "text": default, "value": default},
+        "allowCustomValue": True,
+        "current": {"selected": True, "text": default_disp, "value": default},
         "hide": hide,
         "includeAll": False,
         "label": label,
         "multi": False,
         "name": name,
         "options": [
-            {"selected": v == default, "text": v, "value": v} for v in values
+            {"selected": v == default, "text": d, "value": v} for d, v in items
         ],
-        "query": ",".join(values),
+        "query": ",".join(_query_entry(d, v) for d, v in items),
         "skipUrlSync": False,
         "type": "custom",
     }
@@ -1173,12 +1208,28 @@ def build() -> dict:
             'label_values(cluster_new_status{system_type!="7mode",datacenter=~"$Datacenter"}, cluster)',
         ),
         custom_var("Window", ["15m", "30m", "1h"], "30m", "Percentile window"),
-        # Only a safety net now that ports are filtered by ipspace. The default excludes
-        # nothing extra; e0M is already outside the Cluster ipspace but is not a data port
-        # on any of these platforms.
+        # Safety net on top of the ipspace filter. Useful when net_port_status is
+        # absent (no config collector), in which case this name regex is the only
+        # thing keeping cluster ports out of the network score.
+        #
+        # Preset values match the known cluster-port names per platform:
+        #   A70 / A90 : e1a, e7a   A30 : e4a, e4b   A220 / older FAS : e0a, e0b
+        # All presets also exclude e0M (management port, 1GbE, never a data port).
+        #
+        # If your platform is not listed, type a regex directly into the dropdown
+        # (allowCustomValue is True) or append to the list below and regenerate.
+        #
+        # WARNING: display labels must not contain commas — Grafana splits the CSV
+        # on commas before splitting on " : ", so "A70, A90" would corrupt the list.
         custom_var(
             "ExcludePorts",
-            ["e0M", "e0M|e0a|e0b", "^$"],
+            [
+                "e0M",
+                ("A70 / A90 (also e1a + e7a)", "e0M|e1a|e7a"),
+                ("A30 (also e4a + e4b)", "e0M|e4a|e4b"),
+                ("A220 / older FAS (also e0a + e0b)", "e0M|e0a|e0b"),
+                ("None", "^$"),
+            ],
             "e0M",
             "Also exclude ports",
         ),
