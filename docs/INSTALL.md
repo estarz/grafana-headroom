@@ -229,7 +229,7 @@ three panels before trusting the traffic light:
 | --- | --- | --- |
 | **HA partner coverage** | `1.0` — all nodes paired | No config collector running, or Harvest < 24.05. Pair scores will be incomplete or blank. |
 | **Ethernet ports in scope** | Your data ports only — no cluster ports | Adjust `ExcludePorts`. Cluster ports in this table would inflate the network score. |
-| **Headroom confidence (worst node)** | Any value | A value of 0 or 1 is normal and simply means the dashboard uses `node_cpu_busy` instead of PCU. It is not a fault. |
+| **Headroom confidence (worst node)** | Any value — the tile is informational (blue), never an alarm | `0 unknown` or `1 seed` is normal and simply means the dashboard uses `node_cpu_busy` instead of PCU. It is not a fault. It also tells you which of the two CPU tiles drives the score; the other one is reference only and its colour can disagree with the traffic light. |
 
 If the **HA pairs, models and partner health** table shows an empty `ha_partner` column,
 the config collector is the first thing to check.

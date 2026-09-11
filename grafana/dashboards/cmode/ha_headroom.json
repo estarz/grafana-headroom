@@ -222,7 +222,7 @@
     "type": "prometheus",
     "uid": "${DS_PROMETHEUS}"
    },
-   "description": "Sum of both nodes' performance capacity used. 200% means the survivor would sit exactly at ONTAP's latency knee \u2014 the same line AIQUM calls 'HA pair over-utilized'. Only meaningful when confidence is >= $ConfMin.",
+   "description": "Sum of both nodes' performance capacity used. 200% means the survivor would sit exactly at ONTAP's latency knee \u2014 the same line AIQUM calls 'HA pair over-utilized'. This drives the score only when confidence is >= $ConfMin on both nodes; below that the knee is a seed value, so this tile is reference only and CPU busy drives the score instead.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -376,7 +376,7 @@
    },
    "id": 5,
    "options": {
-    "content": "**What this scores**\n\nWhether the **surviving node** could absorb its partner's load after a takeover \u2014 not\nwhether a node is healthy today. Every score is per **HA pair**; the cluster value is\nthe **worst pair**, because ONTAP moves a failed node's work to its partner only, never\nacross the cluster.\n\n- \ud83d\udfe2 **OK** \u2014 takeover should not cause a problem\n- \ud83d\udfe1 **Latency risk** \u2014 avoid a planned failover at peak\n- \ud83d\udd34 **Service impact risk** \u2014 expect unacceptable latency or loss\n\nInputs are the **95th percentile over $Window**, so a brief spike will not flip the light.\nCPU uses combined **performance capacity used** (current \u00f7 optimal point) when ONTAP's\noptimal-point confidence is \u2265 $ConfMin on both nodes, otherwise the sum of `node_cpu_busy`.\nNetwork sums the same NIC or ifgrp on both nodes. Cluster-interconnect ports are excluded\nby **ipspace**, not by port name.\n\n**Limits.** Summing CPU is a proxy \u2014 takeover adds HA overhead on top. Harvest has no NVRAM\nor HA-interconnect counter, so those are unmodelled. Harvest has no per-port iSCSI or\nNVMe-TCP utilization either, so that traffic is scored through its Ethernet ports.\nAggregate and disk headroom are omitted deliberately (all-flash). This is not AIQUM's\nestimated ms/op after takeover.",
+    "content": "**What this scores**\n\nWhether the **surviving node** could absorb its partner's load after a takeover \u2014 not\nwhether a node is healthy today. Every score is per **HA pair**; the cluster value is\nthe **worst pair**, because ONTAP moves a failed node's work to its partner only, never\nacross the cluster.\n\n- \ud83d\udfe2 **OK** \u2014 takeover should not cause a problem\n- \ud83d\udfe1 **Latency risk** \u2014 avoid a planned failover at peak\n- \ud83d\udd34 **Service impact risk** \u2014 expect unacceptable latency or loss\n\nInputs are the **95th percentile over $Window**, so a brief spike will not flip the light.\nCPU uses combined **performance capacity used** (current \u00f7 optimal point) when ONTAP's\noptimal-point confidence is \u2265 $ConfMin on both nodes, otherwise the sum of `node_cpu_busy`.\nNetwork sums the same NIC or ifgrp on both nodes. Cluster-interconnect ports are excluded\nby **ipspace**, not by port name.\n\n**Only one CPU tile drives the score at a time.** The confidence tile says which: a seeded\nknee (0 or 1) means CPU busy is in play, a measured one means PCU is. The other tile is\nreference only, so its colour can disagree with the light. Confidence is informational \u2014\na low value is not a fault.\n\n**Limits.** Summing CPU is a proxy \u2014 takeover adds HA overhead on top. Harvest has no NVRAM\nor HA-interconnect counter, so those are unmodelled. Harvest has no per-port iSCSI or\nNVMe-TCP utilization either, so that traffic is scored through its Ethernet ports.\nAggregate and disk headroom are omitted deliberately (all-flash). This is not AIQUM's\nestimated ms/op after takeover.",
     "mode": "markdown"
    },
    "title": "How to read this",
@@ -387,7 +387,7 @@
     "type": "prometheus",
     "uid": "${DS_PROMETHEUS}"
    },
-   "description": "Sum of node_cpu_busy (hottest CPU domain, or remaining idle, whichever binds first). This drives the score whenever headroom confidence is low \u2014 which is common, since ONTAP reports confidence 1 until it has measured enough load.",
+   "description": "Sum of node_cpu_busy (hottest CPU domain, or remaining idle, whichever binds first). This drives the score only while headroom confidence is below $ConfMin \u2014 common, since ONTAP reports confidence 1 until it has measured enough load. At or above $ConfMin the score uses PCU instead and this tile is reference only, so its colour can be red while the traffic light is green. Check the confidence tile to see which of the two is in play.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -460,27 +460,45 @@
     "type": "prometheus",
     "uid": "${DS_PROMETHEUS}"
    },
-   "description": "0 unknown, 1 seed value (PCU not trustworthy \u2014 CPU busy is used instead), 2 medium, 3 high.",
+   "description": "How well ONTAP knows the latency knee on the worst node \u2014 a property of the measurement, not of health, so this tile is informational (blue) and never an alarm. 0 unknown and 1 seed mean ONTAP has not measured the knee yet, which is normal on lightly loaded or recently rebooted nodes; the score then uses combined node_cpu_busy and remains valid. 2 medium and 3 high mean the knee is measured, so PCU drives the score once both nodes reach $ConfMin.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "thresholds"
      },
-     "mappings": [],
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "text": "0 unknown",
+         "color": "blue",
+         "index": 0
+        },
+        "1": {
+         "text": "1 seed",
+         "color": "blue",
+         "index": 1
+        },
+        "2": {
+         "text": "2 medium",
+         "color": "green",
+         "index": 2
+        },
+        "3": {
+         "text": "3 high",
+         "color": "green",
+         "index": 3
+        }
+       }
+      }
+     ],
      "thresholds": {
       "mode": "absolute",
       "steps": [
        {
-        "color": "red",
+        "color": "blue",
         "value": null
-       },
-       {
-        "color": "yellow",
-        "value": 2
-       },
-       {
-        "color": "green",
-        "value": 3
        }
       ]
      },

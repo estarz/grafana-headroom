@@ -103,7 +103,18 @@ A well-sized 2-node design keeps **each** node under roughly 40–50% so the pai
 green. 80% on a single node is not "fine" — it is a takeover problem.
 
 The dashboard switches models automatically and shows the confidence factor so you can see
-which one is in play.
+which one is in play. Only one of the two headline CPU tiles drives the score at any moment;
+the other is reference only, and its colour can disagree with the traffic light. A loaded
+cluster is the case where this bites: it has enough load for ONTAP to measure the knee, so
+confidence reaches 2 or 3 and PCU takes over — leaving a red combined-CPU-busy tile that is
+no longer scoring anything.
+
+Confidence itself is deliberately **not** colour-coded as health. It describes the quality of
+ONTAP's measurement, not the safety of a takeover, and a seeded knee is the expected state on
+a comfortably sized cluster. The tile is blue with `0 unknown` / `1 seed` / `2 medium` /
+`3 high` mappings, so the quietest cluster in an estate no longer looks like the only broken
+one. Its mapping text avoids naming a model because the gate is `$ConfMin`: at `ConfMin=1`,
+confidence 1 does trust PCU.
 
 ### One awkward property of the fallback
 

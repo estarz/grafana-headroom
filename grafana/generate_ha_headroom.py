@@ -499,6 +499,11 @@ optimal-point confidence is ≥ $ConfMin on both nodes, otherwise the sum of `no
 Network sums the same NIC or ifgrp on both nodes. Cluster-interconnect ports are excluded
 by **ipspace**, not by port name.
 
+**Only one CPU tile drives the score at a time.** The confidence tile says which: a seeded
+knee (0 or 1) means CPU busy is in play, a measured one means PCU is. The other tile is
+reference only, so its colour can disagree with the light. Confidence is informational —
+a low value is not a fault.
+
 **Limits.** Summing CPU is a proxy — takeover adds HA overhead on top. Harvest has no NVRAM
 or HA-interconnect counter, so those are unmodelled. Harvest has no per-port iSCSI or
 NVMe-TCP utilization either, so that traffic is scored through its Ethernet ports.
@@ -510,7 +515,10 @@ INDEX_THRESH = thresholds(("green", None), ("yellow", 1), ("red", 2))
 PCU_THRESH = thresholds(("green", None), ("yellow", 160), ("red", 200))
 BUSY_THRESH = thresholds(("green", None), ("yellow", 70), ("red", 85))
 PORT_THRESH = thresholds(("green", None), ("yellow", 70), ("red", 85))
-CONF_THRESH = thresholds(("red", None), ("yellow", 2), ("green", 3))
+# Confidence is not a health signal: at 0 or 1 the score silently switches to the
+# CPU busy model and stays valid. Colouring those red reads as a fault, so the
+# tile is neutral and the value mappings carry the meaning instead.
+CONF_THRESH = thresholds(("blue", None))
 COVERAGE_THRESH = thresholds(("red", None), ("green", 1))
 MODEL_THRESH = thresholds(("green", None), ("yellow", 2))
 
@@ -539,6 +547,21 @@ INDEX_MAP = [
             "result": {"text": "Service impact risk", "color": "red", "index": 2},
         },
     },
+]
+
+# Mapping text is deliberately phrased in terms of what ONTAP measured rather than
+# which model wins, because the gate is $ConfMin: at ConfMin=1 a confidence of 1 does
+# trust PCU, so "CPU busy" baked into the text here would be wrong.
+CONF_MAP = [
+    {
+        "type": "value",
+        "options": {
+            "0": {"text": "0 unknown", "color": "blue", "index": 0},
+            "1": {"text": "1 seed", "color": "blue", "index": 1},
+            "2": {"text": "2 medium", "color": "green", "index": 2},
+            "3": {"text": "3 high", "color": "green", "index": 3},
+        },
+    }
 ]
 
 COVERAGE_MAP = [
@@ -683,7 +706,9 @@ def build() -> dict:
             PCU_THRESH,
             "Sum of both nodes' performance capacity used. 200% means the survivor would sit "
             "exactly at ONTAP's latency knee — the same line AIQUM calls 'HA pair "
-            "over-utilized'. Only meaningful when confidence is >= $ConfMin.",
+            "over-utilized'. This drives the score only when confidence is >= $ConfMin on "
+            "both nodes; below that the knee is a seed value, so this tile is reference only "
+            "and CPU busy drives the score instead.",
             decimals=0,
         )
     )
@@ -726,8 +751,11 @@ def build() -> dict:
             "percent",
             BUSY_THRESH,
             "Sum of node_cpu_busy (hottest CPU domain, or remaining idle, whichever binds "
-            "first). This drives the score whenever headroom confidence is low — which is "
-            "common, since ONTAP reports confidence 1 until it has measured enough load.",
+            "first). This drives the score only while headroom confidence is below $ConfMin "
+            "— common, since ONTAP reports confidence 1 until it has measured enough load. "
+            "At or above $ConfMin the score uses PCU instead and this tile is reference "
+            "only, so its colour can be red while the traffic light is green. Check the "
+            "confidence tile to see which of the two is in play.",
             decimals=0,
         )
     )
@@ -742,8 +770,13 @@ def build() -> dict:
             [target(CONF_MIN_CLUSTER, "{{cluster}}", instant=True)],
             "short",
             CONF_THRESH,
-            "0 unknown, 1 seed value (PCU not trustworthy — CPU busy is used instead), "
-            "2 medium, 3 high.",
+            "How well ONTAP knows the latency knee on the worst node — a property of the "
+            "measurement, not of health, so this tile is informational (blue) and never an "
+            "alarm. 0 unknown and 1 seed mean ONTAP has not measured the knee yet, which is "
+            "normal on lightly loaded or recently rebooted nodes; the score then uses "
+            "combined node_cpu_busy and remains valid. 2 medium and 3 high mean the knee is "
+            "measured, so PCU drives the score once both nodes reach $ConfMin.",
+            CONF_MAP,
             decimals=0,
         )
     )
