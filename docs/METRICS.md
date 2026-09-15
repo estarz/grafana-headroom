@@ -156,6 +156,11 @@ For each pair this yields "the load `survivor` would carry after absorbing `vict
 vector matching drops every label not listed in `on()`, so the result is clean:
 `{datacenter, cluster, survivor, victim}`.
 
+Both orientations of a pair are numerically identical — each is `val(A) + val(B)` — so the
+direction labels identify the series without changing the value. The same lack of a
+label-comparison operator that forces this re-orientation also makes it impossible to reduce
+the pair to one canonical series, which is why the panels are labelled per surviving node.
+
 On a 2-node cluster this produces exactly the same number as the old `sum by (cluster)`, so
 it is a strict generalization rather than a behaviour change. Resource-scoped metrics pass
 their identifying label through `on()` as well — `nic` for NICs, `ifgroup` for LAGs.

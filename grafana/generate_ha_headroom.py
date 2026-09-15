@@ -74,6 +74,14 @@ def pair_sum(expr: str, extra: tuple[str, ...] = ()) -> str:
     identify a resource, e.g. nic). Output is keyed by survivor/victim, so a
     2-node cluster yields two symmetric series and an N-node cluster yields one
     series per HA pair per direction.
+
+    Both orientations are always numerically identical: each is val(A) + val(B),
+    and every downstream stage (p95, risk_index, worst_of) is a function of that
+    one number. Emitting a single series per unordered pair would mean choosing a
+    canonical direction, which needs a comparison between `node` and `ha_partner`
+    -- PromQL has no label-comparison operator. The labels are kept because the
+    capacity-weighted model in docs/ROADMAP.md would make the direction real; the
+    panels meanwhile read as one tile per surviving node.
     """
     joined = with_partner(expr)
     k = keys(list(PAIR_KEYS) + list(extra))
@@ -806,17 +814,21 @@ def build() -> dict:
     panels.append(
         stat(
             next_id(),
-            "Takeover risk per HA pair",
+            "Takeover risk per surviving node",
             0,
             y,
             8,
             7,
-            [target(OVERALL_PAIR, "{{survivor}} absorbs {{victim}}", instant=True)],
+            [target(OVERALL_PAIR, "{{survivor}} survives", instant=True)],
             "short",
             INDEX_THRESH,
-            "One tile per direction: the named survivor absorbing the named victim. A 2-node "
-            "cluster shows two tiles with the same value because the model is symmetric "
-            "within a same-model pair.",
+            "One tile per node: what that node would carry if its partner failed. Look up the "
+            "node you intend to keep running. Both nodes of a pair always read the same "
+            "value — summing normalized percentages is direction-independent, so the tiles "
+            "are two views of one pair, not two different outcomes. On a 2-node cluster "
+            "there is only one pair, so this is the same number as 'Can this cluster survive "
+            "a node loss?' above, which is the worst pair in the cluster. This panel only "
+            "adds information on clusters of four nodes or more.",
             INDEX_MAP,
             text_mode="value_and_name",
         )
@@ -832,7 +844,7 @@ def build() -> dict:
             [
                 target(
                     worst_of(INDEX_BY_RESOURCE, k=PAIR_KEYS + ("resource",)),
-                    "{{resource}}: {{survivor}} absorbs {{victim}}",
+                    "{{resource}}: {{survivor}} survives",
                 )
             ],
             "short",
@@ -868,14 +880,15 @@ def build() -> dict:
             [
                 target(
                     OVERALL_PAIR,
-                    "{{survivor}} absorbs {{victim}}",
+                    "{{survivor}} survives",
                     interval="10m",
                 )
             ],
             INDEX_THRESH,
             INDEX_MAP,
             "Green bands are safe windows for a planned takeover or an ONTAP upgrade. "
-            "Ignores this dashboard's time picker and always shows 7 days.",
+            "Ignores this dashboard's time picker and always shows 7 days. One row per node; "
+            "the two nodes of a pair track identically, so read a pair from either row.",
         )
     )
     panels.append(
@@ -924,7 +937,7 @@ def build() -> dict:
             y,
             12,
             8,
-            [target(PCU_PAIR, "{{survivor}} absorbs {{victim}}")],
+            [target(PCU_PAIR, "{{survivor}} survives")],
             "percent",
             "Green below $PcuYellow, yellow to $PcuRed, red beyond. 200% is the survivor "
             "sitting exactly at its latency knee.",
@@ -1014,7 +1027,7 @@ def build() -> dict:
             8,
             [
                 target(BUSY_NODE, "{{node}}", "A"),
-                target(BUSY_PAIR, "{{survivor}} absorbs {{victim}}", "B"),
+                target(BUSY_PAIR, "{{survivor}} survives", "B"),
             ],
             "percent",
             "node_cpu_busy tracks the hottest CPU domain or remaining idle, whichever binds "

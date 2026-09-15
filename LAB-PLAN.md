@@ -237,9 +237,9 @@ Record results in the table at the end of this document.
 
 | | |
 | --- | --- |
-| **Steps** | Read the **Takeover risk per HA pair** panel. |
-| **Expected** | Two tiles, "node1 absorbs node2" and "node2 absorbs node1", with **identical values** — the model is symmetric within a same-model pair. |
-| **Note** | Identical values are correct, not a bug. |
+| **Steps** | Read the **Takeover risk per surviving node** panel. |
+| **Expected** | Two tiles, "node1 survives" and "node2 survives", with **identical values** — each direction evaluates to the same pair sum. |
+| **Note** | Identical values are correct, not a bug. The tiles are two views of one pair, which is why the panel is labelled per surviving node rather than per direction. |
 
 ### TC-04 — Cluster ports are excluded
 

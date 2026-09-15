@@ -41,10 +41,21 @@ one is joined to `node_labels` first, then matched against its partner. The mech
 in [METRICS.md](METRICS.md#ha-pair-scoping).
 
 Each pair produces **two series**, one per direction, labelled `survivor` and `victim`:
-"if `victim` fails, `survivor` carries this." Within a same-model HA pair the two values are
-identical, so a 2-node cluster shows two tiles with the same number. That redundancy is
-deliberate — it keeps the model honest if NetApp ever permits asymmetric pairs, and it reads
-naturally on larger clusters.
+"if `victim` fails, `survivor` carries this." The two are **always numerically identical**,
+not merely usually: each direction evaluates to `val(A) + val(B)`, and every downstream stage
+— the percentile, the risk index, the max across resources — is a function of that single
+number. Nothing in the model reads the direction.
+
+They are not collapsed into one series per pair because that would mean choosing a canonical
+direction, which requires comparing `node` against `ha_partner`, and PromQL has no
+label-comparison operator. (The same wall makes the model-mismatch check cluster-scoped.)
+`label_join` would yield `"A,B"` and `"B,A"` — still two keys.
+
+So the pair keys stay, and the **panels are framed per surviving node instead**: one tile
+per node, answering "if this node's partner failed, what would it carry?" Look up the node
+you intend to keep running. The direction would become meaningful only with the
+capacity-weighted model in [ROADMAP.md](ROADMAP.md#pair-scoped-model-mismatch-detection),
+which needs a per-model capacity weight that Harvest does not export.
 
 ## CPU: the primary signal
 
