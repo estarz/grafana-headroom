@@ -347,6 +347,35 @@ def timeseries(
     return panel
 
 
+def sorted_tiles(name_field: str) -> list[dict]:
+    """Transformations that order a multi-series stat panel by a label value.
+
+    Prometheus returns instant vectors in map order, and a stat panel renders one
+    tile per frame in the order it receives them, so tiles come out unsorted.
+    `sortBy` sorts rows *within* a frame rather than frames within a response, so
+    the target asks for a `table` frame -- every series as one row -- keeps only
+    the name and value columns, and sorts on the name. `values: True` on the panel
+    then renders one tile per row, titled from the one remaining string column.
+
+    The server-side fix would be `sort_by_label()`, but that is gated behind
+    Prometheus's `--enable-feature=promql-experimental-functions`, so a query using
+    it would simply fail on a server without the flag.
+
+    Targets must therefore pass `fmt="table"` and omit `legendFormat`, which a
+    table frame has no use for, and the panel must pass `values=True`.
+    """
+    return [
+        {
+            "id": "filterFieldsByName",
+            "options": {"include": {"pattern": f"^({name_field}|Value.*)$"}},
+        },
+        {
+            "id": "sortBy",
+            "options": {"fields": {}, "sort": [{"field": name_field, "desc": False}]},
+        },
+    ]
+
+
 def stat(
     pid: int,
     title: str,
@@ -361,6 +390,8 @@ def stat(
     mappings=None,
     decimals=None,
     text_mode: str = "auto",
+    transformations=None,
+    values: bool = False,
 ) -> dict:
     defaults = {
         "color": {"mode": "thresholds"},
@@ -370,7 +401,7 @@ def stat(
     }
     if decimals is not None:
         defaults["decimals"] = decimals
-    return {
+    panel = {
         "datasource": DS,
         "description": description,
         "fieldConfig": {"defaults": defaults, "overrides": []},
@@ -384,7 +415,7 @@ def stat(
             "reduceOptions": {
                 "calcs": ["lastNotNull"],
                 "fields": "",
-                "values": False,
+                "values": values,
             },
             "textMode": text_mode,
         },
@@ -393,6 +424,9 @@ def stat(
         "title": title,
         "type": "stat",
     }
+    if transformations:
+        panel["transformations"] = transformations
+    return panel
 
 
 def state_timeline(
@@ -692,13 +726,15 @@ def build() -> dict:
             y,
             8,
             8,
-            [target(OVERALL_CLUSTER, "{{cluster}}", instant=True)],
+            [target(OVERALL_CLUSTER, instant=True, fmt="table")],
             "short",
             INDEX_THRESH,
             "Worst HA pair in the cluster. Risk index: 1.0 is the yellow line, 2.0 the red "
             "line. Worst of CPU and network, 95th percentile over $Window.",
             INDEX_MAP,
             text_mode="value_and_name",
+            transformations=sorted_tiles("cluster"),
+            values=True,
         )
     )
     panels.append(
@@ -709,7 +745,7 @@ def build() -> dict:
             y,
             4,
             4,
-            [target(PCU_CLUSTER_P95, "{{cluster}}", instant=True)],
+            [target(PCU_CLUSTER_P95, instant=True, fmt="table")],
             "percent",
             PCU_THRESH,
             "Sum of both nodes' performance capacity used. 200% means the survivor would sit "
@@ -718,6 +754,8 @@ def build() -> dict:
             "both nodes; below that the knee is a seed value, so this tile is reference only "
             "and CPU busy drives the score instead.",
             decimals=0,
+            transformations=sorted_tiles("cluster"),
+            values=True,
         )
     )
     panels.append(
@@ -728,12 +766,14 @@ def build() -> dict:
             y,
             4,
             4,
-            [target(PORT_CLUSTER_P95, "{{cluster}}", instant=True)],
+            [target(PORT_CLUSTER_P95, instant=True, fmt="table")],
             "percent",
             PORT_THRESH,
             "Worst NIC or ifgrp once both nodes' traffic lands on one controller. Covers NAS, "
             "iSCSI and NVMe-TCP, which all share these Ethernet ports.",
             decimals=0,
+            transformations=sorted_tiles("cluster"),
+            values=True,
         )
     )
     panels.append(
@@ -755,7 +795,7 @@ def build() -> dict:
             y + 4,
             4,
             4,
-            [target(BUSY_CLUSTER_P95, "{{cluster}}", instant=True)],
+            [target(BUSY_CLUSTER_P95, instant=True, fmt="table")],
             "percent",
             BUSY_THRESH,
             "Sum of node_cpu_busy (hottest CPU domain, or remaining idle, whichever binds "
@@ -765,6 +805,8 @@ def build() -> dict:
             "only, so its colour can be red while the traffic light is green. Check the "
             "confidence tile to see which of the two is in play.",
             decimals=0,
+            transformations=sorted_tiles("cluster"),
+            values=True,
         )
     )
     panels.append(
@@ -775,7 +817,7 @@ def build() -> dict:
             y + 4,
             2,
             4,
-            [target(CONF_MIN_CLUSTER, "{{cluster}}", instant=True)],
+            [target(CONF_MIN_CLUSTER, instant=True, fmt="table")],
             "short",
             CONF_THRESH,
             "How well ONTAP knows the latency knee on the worst node — a property of the "
@@ -786,6 +828,8 @@ def build() -> dict:
             "measured, so PCU drives the score once both nodes reach $ConfMin.",
             CONF_MAP,
             decimals=0,
+            transformations=sorted_tiles("cluster"),
+            values=True,
         )
     )
     panels.append(
@@ -796,13 +840,15 @@ def build() -> dict:
             y + 4,
             2,
             4,
-            [target(MODEL_COUNT, "{{cluster}}", instant=True)],
+            [target(MODEL_COUNT, instant=True, fmt="table")],
             "short",
             MODEL_THRESH,
             "Summing normalized CPU percentages assumes both nodes have equal capacity. "
             "1 means the cluster is uniform. More than 1 means check that each HA pair is "
             "still same-model before trusting the score.",
             decimals=0,
+            transformations=sorted_tiles("cluster"),
+            values=True,
         )
     )
     y += 8
@@ -819,10 +865,12 @@ def build() -> dict:
             y,
             8,
             7,
-            [target(OVERALL_PAIR, "{{survivor}} survives", instant=True)],
+            [target(OVERALL_PAIR, instant=True, fmt="table")],
             "short",
             INDEX_THRESH,
-            "One tile per node: what that node would carry if its partner failed. Look up the "
+            "One tile per node, sorted by node name so the two nodes of an HA pair sit next "
+            "to each other under ONTAP's default naming. What that node would carry if its "
+            "partner failed. Look up the "
             "node you intend to keep running. Both nodes of a pair always read the same "
             "value — summing normalized percentages is direction-independent, so the tiles "
             "are two views of one pair, not two different outcomes. On a 2-node cluster "
@@ -831,6 +879,8 @@ def build() -> dict:
             "adds information on clusters of four nodes or more.",
             INDEX_MAP,
             text_mode="value_and_name",
+            transformations=sorted_tiles("survivor"),
+            values=True,
         )
     )
     panels.append(
@@ -899,7 +949,7 @@ def build() -> dict:
             y,
             4,
             8,
-            [target(HA_COVERAGE, "{{cluster}}", instant=True)],
+            [target(HA_COVERAGE, instant=True, fmt="table")],
             "percentunit",
             COVERAGE_THRESH,
             "Fraction of nodes with an ha_partner label. Anything below 1 means the pair "
@@ -907,6 +957,8 @@ def build() -> dict:
             "and Harvest is 24.05 or newer.",
             COVERAGE_MAP,
             text_mode="value_and_name",
+            transformations=sorted_tiles("cluster"),
+            values=True,
         )
     )
     y += 8

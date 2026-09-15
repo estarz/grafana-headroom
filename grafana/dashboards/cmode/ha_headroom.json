@@ -195,7 +195,7 @@
       "lastNotNull"
      ],
      "fields": "",
-     "values": false
+     "values": true
     },
     "textMode": "value_and_name"
    },
@@ -209,13 +209,36 @@
      "exemplar": false,
      "expr": "max by (datacenter, cluster) (\nmax by (datacenter, cluster, survivor, victim) (\nlabel_replace(\n(\n(\nclamp_max(\n(\nquantile_over_time(0.95, (\n(\nlabel_replace(\nlabel_replace(\n(\n100\n* headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n/ (headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} > 0)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\n100\n* headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n/ (headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} > 0)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n)[$Window:])\n)\n/ $PcuYellow, 1)\n+ clamp_min(\n(\n(\nquantile_over_time(0.95, (\n(\nlabel_replace(\nlabel_replace(\n(\n100\n* headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n/ (headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} > 0)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\n100\n* headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n/ (headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} > 0)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n)[$Window:])\n)\n- $PcuYellow\n)\n/ ($PcuRed - $PcuYellow), 0)\n)\nand on (datacenter, cluster, survivor, victim) (\n(\n(\nlabel_replace(\nlabel_replace(\n(\nheadroom_cpu_optimal_point_confidence_factor{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} >= bool $ConfMin\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\nheadroom_cpu_optimal_point_confidence_factor{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} >= bool $ConfMin\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n) == 2\n)\n)\nor (\nclamp_max(\n(\nquantile_over_time(0.95, (\n(\nlabel_replace(\nlabel_replace(\n(\nnode_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\nnode_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n)[$Window:])\n)\n/ $BusyYellow, 1)\n+ clamp_min(\n(\n(\nquantile_over_time(0.95, (\n(\nlabel_replace(\nlabel_replace(\n(\nnode_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\nnode_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n)[$Window:])\n)\n- $BusyYellow\n)\n/ ($BusyRed - $BusyYellow), 0)\n)\n, \"resource\", \"cpu\", \"\", \"\")\nor\nlabel_replace(\nclamp_max(\n(\nquantile_over_time(0.95, (\nmax by (datacenter, cluster, survivor, victim) (\nlabel_replace(\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} * 100\n  * on (datacenter, cluster, node, nic) group_left ()\n    label_replace((net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1), \"nic\", \"$1\", \"port\", \"(.*)\")\n)\nor (\n  (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"} * 100)\n  unless on (datacenter, cluster) (net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1)\n)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim, nic)\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} * 100\n  * on (datacenter, cluster, node, nic) group_left ()\n    label_replace((net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1), \"nic\", \"$1\", \"port\", \"(.*)\")\n)\nor (\n  (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"} * 100)\n  unless on (datacenter, cluster) (net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1)\n)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n, \"resource\", \"nic\", \"\", \"\")\nor\nlabel_replace(\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim, ifgroup)\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n, \"resource\", \"ifgrp\", \"\", \"\")\n)\n)[$Window:])\n)\n/ $PortYellow, 1)\n+ clamp_min(\n(\n(\nquantile_over_time(0.95, (\nmax by (datacenter, cluster, survivor, victim) (\nlabel_replace(\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} * 100\n  * on (datacenter, cluster, node, nic) group_left ()\n    label_replace((net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1), \"nic\", \"$1\", \"port\", \"(.*)\")\n)\nor (\n  (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"} * 100)\n  unless on (datacenter, cluster) (net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1)\n)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim, nic)\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} * 100\n  * on (datacenter, cluster, node, nic) group_left ()\n    label_replace((net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1), \"nic\", \"$1\", \"port\", \"(.*)\")\n)\nor (\n  (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"} * 100)\n  unless on (datacenter, cluster) (net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1)\n)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n, \"resource\", \"nic\", \"\", \"\")\nor\nlabel_replace(\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim, ifgroup)\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n, \"resource\", \"ifgrp\", \"\", \"\")\n)\n)[$Window:])\n)\n- $PortYellow\n)\n/ ($PortRed - $PortYellow), 0)\n, \"resource\", \"network\", \"\", \"\")\n)\n)",
      "interval": "",
-     "legendFormat": "{{cluster}}",
+     "legendFormat": "",
      "refId": "A",
-     "instant": true
+     "instant": true,
+     "format": "table"
     }
    ],
    "title": "Can this cluster survive a node loss?",
-   "type": "stat"
+   "type": "stat",
+   "transformations": [
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "pattern": "^(cluster|Value.*)$"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "fields": {},
+      "sort": [
+       {
+        "field": "cluster",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ]
   },
   {
    "datasource": {
@@ -268,7 +291,7 @@
       "lastNotNull"
      ],
      "fields": "",
-     "values": false
+     "values": true
     },
     "textMode": "auto"
    },
@@ -282,13 +305,36 @@
      "exemplar": false,
      "expr": "max by (datacenter, cluster) (\nquantile_over_time(0.95, (\n(\nlabel_replace(\nlabel_replace(\n(\n100\n* headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n/ (headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} > 0)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\n100\n* headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n/ (headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} > 0)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n)[$Window:])\n)",
      "interval": "",
-     "legendFormat": "{{cluster}}",
+     "legendFormat": "",
      "refId": "A",
-     "instant": true
+     "instant": true,
+     "format": "table"
     }
    ],
    "title": "Combined PCU after takeover (p95)",
-   "type": "stat"
+   "type": "stat",
+   "transformations": [
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "pattern": "^(cluster|Value.*)$"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "fields": {},
+      "sort": [
+       {
+        "field": "cluster",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ]
   },
   {
    "datasource": {
@@ -341,7 +387,7 @@
       "lastNotNull"
      ],
      "fields": "",
-     "values": false
+     "values": true
     },
     "textMode": "auto"
    },
@@ -355,13 +401,36 @@
      "exemplar": false,
      "expr": "max by (datacenter, cluster) (\nquantile_over_time(0.95, (\nmax by (datacenter, cluster, survivor, victim) (\nlabel_replace(\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} * 100\n  * on (datacenter, cluster, node, nic) group_left ()\n    label_replace((net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1), \"nic\", \"$1\", \"port\", \"(.*)\")\n)\nor (\n  (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"} * 100)\n  unless on (datacenter, cluster) (net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1)\n)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim, nic)\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} * 100\n  * on (datacenter, cluster, node, nic) group_left ()\n    label_replace((net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1), \"nic\", \"$1\", \"port\", \"(.*)\")\n)\nor (\n  (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"} * 100)\n  unless on (datacenter, cluster) (net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1)\n)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n, \"resource\", \"nic\", \"\", \"\")\nor\nlabel_replace(\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim, ifgroup)\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n, \"resource\", \"ifgrp\", \"\", \"\")\n)\n)[$Window:])\n)",
      "interval": "",
-     "legendFormat": "{{cluster}}",
+     "legendFormat": "",
      "refId": "A",
-     "instant": true
+     "instant": true,
+     "format": "table"
     }
    ],
    "title": "Hottest survivor port (p95)",
-   "type": "stat"
+   "type": "stat",
+   "transformations": [
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "pattern": "^(cluster|Value.*)$"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "fields": {},
+      "sort": [
+       {
+        "field": "cluster",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ]
   },
   {
    "datasource": {
@@ -433,7 +502,7 @@
       "lastNotNull"
      ],
      "fields": "",
-     "values": false
+     "values": true
     },
     "textMode": "auto"
    },
@@ -447,13 +516,36 @@
      "exemplar": false,
      "expr": "max by (datacenter, cluster) (\nquantile_over_time(0.95, (\n(\nlabel_replace(\nlabel_replace(\n(\nnode_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\nnode_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n)[$Window:])\n)",
      "interval": "",
-     "legendFormat": "{{cluster}}",
+     "legendFormat": "",
      "refId": "A",
-     "instant": true
+     "instant": true,
+     "format": "table"
     }
    ],
    "title": "Combined CPU busy after takeover (p95)",
-   "type": "stat"
+   "type": "stat",
+   "transformations": [
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "pattern": "^(cluster|Value.*)$"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "fields": {},
+      "sort": [
+       {
+        "field": "cluster",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ]
   },
   {
    "datasource": {
@@ -524,7 +616,7 @@
       "lastNotNull"
      ],
      "fields": "",
-     "values": false
+     "values": true
     },
     "textMode": "auto"
    },
@@ -538,13 +630,36 @@
      "exemplar": false,
      "expr": "min by (datacenter, cluster) (headroom_cpu_optimal_point_confidence_factor{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"})",
      "interval": "",
-     "legendFormat": "{{cluster}}",
+     "legendFormat": "",
      "refId": "A",
-     "instant": true
+     "instant": true,
+     "format": "table"
     }
    ],
    "title": "Headroom confidence (worst node)",
-   "type": "stat"
+   "type": "stat",
+   "transformations": [
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "pattern": "^(cluster|Value.*)$"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "fields": {},
+      "sort": [
+       {
+        "field": "cluster",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ]
   },
   {
    "datasource": {
@@ -593,7 +708,7 @@
       "lastNotNull"
      ],
      "fields": "",
-     "values": false
+     "values": true
     },
     "textMode": "auto"
    },
@@ -607,13 +722,36 @@
      "exemplar": false,
      "expr": "count by (datacenter, cluster) (count by (datacenter, cluster, model) (node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}))",
      "interval": "",
-     "legendFormat": "{{cluster}}",
+     "legendFormat": "",
      "refId": "A",
-     "instant": true
+     "instant": true,
+     "format": "table"
     }
    ],
    "title": "Distinct node models",
-   "type": "stat"
+   "type": "stat",
+   "transformations": [
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "pattern": "^(cluster|Value.*)$"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "fields": {},
+      "sort": [
+       {
+        "field": "cluster",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ]
   },
   {
    "collapsed": false,
@@ -637,7 +775,7 @@
     "type": "prometheus",
     "uid": "${DS_PROMETHEUS}"
    },
-   "description": "One tile per node: what that node would carry if its partner failed. Look up the node you intend to keep running. Both nodes of a pair always read the same value \u2014 summing normalized percentages is direction-independent, so the tiles are two views of one pair, not two different outcomes. On a 2-node cluster there is only one pair, so this is the same number as 'Can this cluster survive a node loss?' above, which is the worst pair in the cluster. This panel only adds information on clusters of four nodes or more.",
+   "description": "One tile per node, sorted by node name so the two nodes of an HA pair sit next to each other under ONTAP's default naming. What that node would carry if its partner failed. Look up the node you intend to keep running. Both nodes of a pair always read the same value \u2014 summing normalized percentages is direction-independent, so the tiles are two views of one pair, not two different outcomes. On a 2-node cluster there is only one pair, so this is the same number as 'Can this cluster survive a node loss?' above, which is the worst pair in the cluster. This panel only adds information on clusters of four nodes or more.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -719,7 +857,7 @@
       "lastNotNull"
      ],
      "fields": "",
-     "values": false
+     "values": true
     },
     "textMode": "value_and_name"
    },
@@ -733,13 +871,36 @@
      "exemplar": false,
      "expr": "max by (datacenter, cluster, survivor, victim) (\nlabel_replace(\n(\n(\nclamp_max(\n(\nquantile_over_time(0.95, (\n(\nlabel_replace(\nlabel_replace(\n(\n100\n* headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n/ (headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} > 0)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\n100\n* headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n/ (headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} > 0)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n)[$Window:])\n)\n/ $PcuYellow, 1)\n+ clamp_min(\n(\n(\nquantile_over_time(0.95, (\n(\nlabel_replace(\nlabel_replace(\n(\n100\n* headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n/ (headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} > 0)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\n100\n* headroom_cpu_current_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n/ (headroom_cpu_optimal_point_utilization{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} > 0)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n)[$Window:])\n)\n- $PcuYellow\n)\n/ ($PcuRed - $PcuYellow), 0)\n)\nand on (datacenter, cluster, survivor, victim) (\n(\n(\nlabel_replace(\nlabel_replace(\n(\nheadroom_cpu_optimal_point_confidence_factor{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} >= bool $ConfMin\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\nheadroom_cpu_optimal_point_confidence_factor{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} >= bool $ConfMin\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n) == 2\n)\n)\nor (\nclamp_max(\n(\nquantile_over_time(0.95, (\n(\nlabel_replace(\nlabel_replace(\n(\nnode_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\nnode_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n)[$Window:])\n)\n/ $BusyYellow, 1)\n+ clamp_min(\n(\n(\nquantile_over_time(0.95, (\n(\nlabel_replace(\nlabel_replace(\n(\nnode_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim)\n(\nlabel_replace(\nlabel_replace(\n(\nnode_cpu_busy{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"}\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n)[$Window:])\n)\n- $BusyYellow\n)\n/ ($BusyRed - $BusyYellow), 0)\n)\n, \"resource\", \"cpu\", \"\", \"\")\nor\nlabel_replace(\nclamp_max(\n(\nquantile_over_time(0.95, (\nmax by (datacenter, cluster, survivor, victim) (\nlabel_replace(\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} * 100\n  * on (datacenter, cluster, node, nic) group_left ()\n    label_replace((net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1), \"nic\", \"$1\", \"port\", \"(.*)\")\n)\nor (\n  (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"} * 100)\n  unless on (datacenter, cluster) (net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1)\n)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim, nic)\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} * 100\n  * on (datacenter, cluster, node, nic) group_left ()\n    label_replace((net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1), \"nic\", \"$1\", \"port\", \"(.*)\")\n)\nor (\n  (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"} * 100)\n  unless on (datacenter, cluster) (net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1)\n)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n, \"resource\", \"nic\", \"\", \"\")\nor\nlabel_replace(\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim, ifgroup)\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n, \"resource\", \"ifgrp\", \"\", \"\")\n)\n)[$Window:])\n)\n/ $PortYellow, 1)\n+ clamp_min(\n(\n(\nquantile_over_time(0.95, (\nmax by (datacenter, cluster, survivor, victim) (\nlabel_replace(\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} * 100\n  * on (datacenter, cluster, node, nic) group_left ()\n    label_replace((net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1), \"nic\", \"$1\", \"port\", \"(.*)\")\n)\nor (\n  (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"} * 100)\n  unless on (datacenter, cluster) (net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1)\n)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim, nic)\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"} * 100\n  * on (datacenter, cluster, node, nic) group_left ()\n    label_replace((net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1), \"nic\", \"$1\", \"port\", \"(.*)\")\n)\nor (\n  (nic_util_percent{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",nic!~\"$ExcludePorts\"} * 100)\n  unless on (datacenter, cluster) (net_port_status{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ipspace!=\"Cluster\",port!~\"$ExcludePorts\"} == 1)\n)\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n, \"resource\", \"nic\", \"\", \"\")\nor\nlabel_replace(\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"node\", \"(.*)\")\n, \"victim\", \"$1\", \"ha_partner\", \"(.*)\")\n)\n+ on (datacenter, cluster, survivor, victim, ifgroup)\n(\nlabel_replace(\nlabel_replace(\n(\n(\n  nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"}\n  + abs(nic_ifgrp_rx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"} - nic_ifgrp_tx_perc{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ports!=\"\"})\n) / 2 * 100\n)\n* on (datacenter, cluster, node) group_left (ha_partner)\n(node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"} == 1)\n, \"survivor\", \"$1\", \"ha_partner\", \"(.*)\")\n, \"victim\", \"$1\", \"node\", \"(.*)\")\n)\n, \"resource\", \"ifgrp\", \"\", \"\")\n)\n)[$Window:])\n)\n- $PortYellow\n)\n/ ($PortRed - $PortYellow), 0)\n, \"resource\", \"network\", \"\", \"\")\n)",
      "interval": "",
-     "legendFormat": "{{survivor}} survives",
+     "legendFormat": "",
      "refId": "A",
-     "instant": true
+     "instant": true,
+     "format": "table"
     }
    ],
    "title": "Takeover risk per surviving node",
-   "type": "stat"
+   "type": "stat",
+   "transformations": [
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "pattern": "^(survivor|Value.*)$"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "fields": {},
+      "sort": [
+       {
+        "field": "survivor",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ]
   },
   {
    "datasource": {
@@ -1089,7 +1250,7 @@
       "lastNotNull"
      ],
      "fields": "",
-     "values": false
+     "values": true
     },
     "textMode": "value_and_name"
    },
@@ -1103,13 +1264,36 @@
      "exemplar": false,
      "expr": "count by (datacenter, cluster) (node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\",ha_partner!=\"\"})\n/\ncount by (datacenter, cluster) (node_labels{datacenter=~\"$Datacenter\",cluster=~\"$Cluster\"})",
      "interval": "",
-     "legendFormat": "{{cluster}}",
+     "legendFormat": "",
      "refId": "A",
-     "instant": true
+     "instant": true,
+     "format": "table"
     }
    ],
    "title": "HA partner coverage",
-   "type": "stat"
+   "type": "stat",
+   "transformations": [
+    {
+     "id": "filterFieldsByName",
+     "options": {
+      "include": {
+       "pattern": "^(cluster|Value.*)$"
+      }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "fields": {},
+      "sort": [
+       {
+        "field": "cluster",
+        "desc": false
+       }
+      ]
+     }
+    }
+   ]
   },
   {
    "collapsed": false,
