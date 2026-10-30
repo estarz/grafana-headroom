@@ -224,7 +224,7 @@ Record results in the table at the end of this document.
 | --- | --- |
 | **Steps** | Open the dashboard, set Datacenter and Cluster. Read the **HA partner coverage** panel. |
 | **Expected** | `1.0`, displayed as "All nodes paired", green. |
-| **Fails if** | Below 1.0 — the Rest collector is not running, or Harvest is older than 24.05. |
+| **Fails if** | Below 1.0 — no config collector (Rest or Zapi) is running, or Harvest is older than 24.05. The takeover light then shows Unknown. |
 
 ### TC-02 — Pair table is populated
 
@@ -285,7 +285,7 @@ Record results in the table at the end of this document.
 | | |
 | --- | --- |
 | **Steps** | Read **Headroom confidence (worst node)** and the **Headroom confidence factor** timeseries. |
-| **Expected** | `1`, coloured red. This is **correct and expected**, not a fault. ONTAP reports 1 when it is using a seed value because it has not observed enough load to model the latency curve. |
+| **Expected** | `1`, coloured blue, reading `1 seed`. This is **correct and expected**, not a fault. ONTAP reports 1 when it is using a seed value because it has not observed enough load to model the latency curve. |
 | **Corroborate** | `statistics show -object resource_headroom_cpu -instance CPU_*` — an idle node typically shows `current_utilization 0` with a non-zero `optimal_point_utilization` (the seed) and `confidence_factor 1`. |
 
 ### TC-10 — The CPU model switches on confidence

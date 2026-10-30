@@ -213,8 +213,13 @@ or (
 PORT_INDEX = risk_index(PORT_HOT_P95, "$PortYellow", "$PortRed")
 
 INDEX_BY_RESOURCE = {"cpu": CPU_INDEX, "network": PORT_INDEX}
-OVERALL_PAIR = worst_of(INDEX_BY_RESOURCE)
-OVERALL_CLUSTER = f"max by ({keys(CLUSTER_KEYS)}) (\n{OVERALL_PAIR}\n)"
+# Raw worst-of still drops an absent resource. The gated expressions below are
+# what the traffic light shows: a missing required input must be Unknown, not a
+# green score from whatever series happened to be present. Low headroom
+# confidence is not a missing input — CPU_INDEX has already fallen back to
+# node_cpu_busy, and that fallback stays a valid score.
+OVERALL_PAIR_RAW = worst_of(INDEX_BY_RESOURCE)
+OVERALL_CLUSTER_RAW = f"max by ({keys(CLUSTER_KEYS)}) (\n{OVERALL_PAIR_RAW}\n)"
 
 # Roll-ups for the headline numbers, kept in native units because those are the
 # values an admin can check against ONTAP.
@@ -226,6 +231,55 @@ PORT_CLUSTER_P95 = f"max by ({keys(CLUSTER_KEYS)}) (\n{PORT_HOT_P95}\n)"
 HA_COVERAGE = f"""count by ({keys(CLUSTER_KEYS)}) ({NODE_LABELS})
 /
 count by ({keys(CLUSTER_KEYS)}) (node_labels{{{SEL}}})"""
+
+# A real risk index is >= 0, so -1 is free as the Unknown sentinel.
+_PAIR_ON = keys(PAIR_KEYS)
+_CLUSTER_ON = keys(CLUSTER_KEYS)
+PAIR_READY = f"""(
+({BUSY_PAIR_P95})
+and on ({_PAIR_ON}) ({PORT_HOT_P95})
+and on ({_CLUSTER_ON}) ({HA_COVERAGE} == 1)
+)"""
+CLUSTER_READY = f"""(
+({HA_COVERAGE} == 1)
+and on ({_CLUSTER_ON}) ({BUSY_CLUSTER_P95})
+and on ({_CLUSTER_ON}) ({PORT_CLUSTER_P95})
+)"""
+
+
+def unknown_unless(score: str, ready: str, anchor: str, on: str) -> str:
+    """Keep `score` only where `ready` has a series; otherwise emit -1.
+
+    `or` keeps the left-hand series when both sides share a label set, so the
+    score is filtered with `and` before the sentinel is attached. The anchor
+    is any series that proves the cluster is being scraped at all: with no
+    anchor there is nothing to label, and the panel correctly reads No data.
+    """
+    return f"""(
+({score})
+and on ({on}) ({ready})
+)
+or
+(
+0 * (
+({anchor})
+unless on ({on}) ({ready})
+) - 1
+)"""
+
+
+OVERALL_PAIR = unknown_unless(
+    OVERALL_PAIR_RAW,
+    PAIR_READY,
+    f"({BUSY_PAIR_P95}) or ({PORT_HOT_P95})",
+    _PAIR_ON,
+)
+OVERALL_CLUSTER = unknown_unless(
+    OVERALL_CLUSTER_RAW,
+    CLUSTER_READY,
+    f"({HA_COVERAGE}) or ({BUSY_CLUSTER_P95}) or ({PORT_CLUSTER_P95})",
+    _CLUSTER_ON,
+)
 
 CONF_MIN_CLUSTER = (
     f"min by ({keys(CLUSTER_KEYS)}) "
@@ -541,10 +595,20 @@ optimal-point confidence is ≥ $ConfMin on both nodes, otherwise the sum of `no
 Network sums the same NIC or ifgrp on both nodes. Cluster-interconnect ports are excluded
 by **ipspace**, not by port name.
 
-**Only one CPU tile drives the score at a time.** The confidence tile says which: a seeded
-knee (0 or 1) means CPU busy is in play, a measured one means PCU is. The other tile is
-reference only, so its colour can disagree with the light. Confidence is informational —
-a low value is not a fault.
+**PCU** is performance capacity used: 100 × current utilization / optimal-point
+utilization. It is how full the node is relative to ONTAP's latency knee, not raw CPU percent.
+
+**Only one CPU tile drives the score at a time.** PCU is live only when headroom confidence
+is at least $ConfMin on **both** nodes. One node below that switches the whole pair to
+combined CPU busy, so the light can change color while the load does not. An upgrade or
+reboot sets that node back to the seed, and it stays there until that node's own load
+remeasures the knee. The other CPU tile is reference only, so its colour can disagree
+with the light. Confidence is informational — a low value is not a fault, and it is not
+Unknown.
+
+**Unknown** means the score was not evaluated. It appears when a node has no HA partner,
+or when the CPU-busy series or the Ethernet series is missing. A low confidence factor
+still produces a real score, on CPU busy.
 
 **Limits.** Summing CPU is a proxy — takeover adds HA overhead on top. Harvest has no NVRAM
 or HA-interconnect counter, so those are unmodelled. Harvest has no per-port iSCSI or
@@ -553,7 +617,8 @@ Aggregate and disk headroom are omitted deliberately (all-flash). This is not AI
 estimated ms/op after takeover."""
 
 
-INDEX_THRESH = thresholds(("green", None), ("yellow", 1), ("red", 2))
+# Below 0 is the Unknown sentinel (-1). A real index starts at 0.
+INDEX_THRESH = thresholds(("blue", None), ("green", 0), ("yellow", 1), ("red", 2))
 PCU_THRESH = thresholds(("green", None), ("yellow", 160), ("red", 200))
 BUSY_THRESH = thresholds(("green", None), ("yellow", 70), ("red", 85))
 PORT_THRESH = thresholds(("green", None), ("yellow", 70), ("red", 85))
@@ -568,9 +633,17 @@ INDEX_MAP = [
     {
         "type": "range",
         "options": {
-            "from": -1,
+            "from": -2,
+            "to": -0.5,
+            "result": {"text": "Unknown", "color": "blue", "index": 0},
+        },
+    },
+    {
+        "type": "range",
+        "options": {
+            "from": 0,
             "to": 1,
-            "result": {"text": "OK", "color": "green", "index": 0},
+            "result": {"text": "OK", "color": "green", "index": 1},
         },
     },
     {
@@ -578,7 +651,7 @@ INDEX_MAP = [
         "options": {
             "from": 1,
             "to": 2,
-            "result": {"text": "Latency risk", "color": "yellow", "index": 1},
+            "result": {"text": "Latency risk", "color": "yellow", "index": 2},
         },
     },
     {
@@ -586,7 +659,7 @@ INDEX_MAP = [
         "options": {
             "from": 2,
             "to": 1000,
-            "result": {"text": "Service impact risk", "color": "red", "index": 2},
+            "result": {"text": "Service impact risk", "color": "red", "index": 3},
         },
     },
 ]
@@ -730,7 +803,13 @@ def build() -> dict:
             "short",
             INDEX_THRESH,
             "Worst HA pair in the cluster. Risk index: 1.0 is the yellow line, 2.0 the red "
-            "line. Worst of CPU and network, 95th percentile over $Window.",
+            "line. Worst of CPU and network, 95th percentile over $Window. The CPU input is "
+            "PCU when headroom confidence is at least $ConfMin on both nodes, and combined "
+            "node_cpu_busy otherwise. One node below $ConfMin switches the pair to CPU busy, "
+            "so the light can change color while the load does not. The other CPU tile is "
+            "reference only and its colour can disagree. Unknown means HA pairing is "
+            "incomplete, or the CPU-busy series or the network series is missing. A low "
+            "confidence factor is not Unknown: the score stays valid on CPU busy.",
             INDEX_MAP,
             text_mode="value_and_name",
             transformations=sorted_tiles("cluster"),
@@ -748,11 +827,12 @@ def build() -> dict:
             [target(PCU_CLUSTER_P95, instant=True, fmt="table")],
             "percent",
             PCU_THRESH,
-            "Sum of both nodes' performance capacity used. 200% means the survivor would sit "
-            "exactly at ONTAP's latency knee — the same line AIQUM calls 'HA pair "
-            "over-utilized'. This drives the score only when confidence is >= $ConfMin on "
-            "both nodes; below that the knee is a seed value, so this tile is reference only "
-            "and CPU busy drives the score instead.",
+            "PCU is performance capacity used: 100 × current utilization / optimal-point "
+            "utilization, summed across the HA pair. It is fullness against ONTAP's latency "
+            "knee, not raw CPU percent. 200% means the survivor would sit exactly at that "
+            "knee — the same line AIQUM calls 'HA pair over-utilized'. This drives the score "
+            "only when confidence is >= $ConfMin on both nodes; below that the knee is a seed "
+            "value, so this tile is reference only and CPU busy drives the score instead.",
             decimals=0,
             transformations=sorted_tiles("cluster"),
             values=True,
@@ -822,10 +902,13 @@ def build() -> dict:
             CONF_THRESH,
             "How well ONTAP knows the latency knee on the worst node — a property of the "
             "measurement, not of health, so this tile is informational (blue) and never an "
-            "alarm. 0 unknown and 1 seed mean ONTAP has not measured the knee yet, which is "
-            "normal on lightly loaded or recently rebooted nodes; the score then uses "
-            "combined node_cpu_busy and remains valid. 2 medium and 3 high mean the knee is "
-            "measured, so PCU drives the score once both nodes reach $ConfMin.",
+            "alarm. 0 unknown and 1 seed mean ONTAP has not measured the knee yet. An upgrade "
+            "or reboot sets that node back to the seed, and it stays there until that node's "
+            "own load reaches the knee; the partner recovering does not bring it back. One "
+            "node still on the seed switches the pair to combined node_cpu_busy, so the light "
+            "can change color while the load does not. The score remains valid. 2 medium and "
+            "3 high mean the knee is measured, so PCU drives the score once both nodes reach "
+            "$ConfMin.",
             CONF_MAP,
             decimals=0,
             transformations=sorted_tiles("cluster"),
@@ -876,7 +959,8 @@ def build() -> dict:
             "are two views of one pair, not two different outcomes. On a 2-node cluster "
             "there is only one pair, so this is the same number as 'Can this cluster survive "
             "a node loss?' above, which is the worst pair in the cluster. This panel only "
-            "adds information on clusters of four nodes or more.",
+            "adds information on clusters of four nodes or more. Unknown means this pair "
+            "was not scored: HA coverage is below 1, or CPU busy or Ethernet data is missing.",
             INDEX_MAP,
             text_mode="value_and_name",
             transformations=sorted_tiles("survivor"),
@@ -913,7 +997,7 @@ def build() -> dict:
             7,
             [target(f"node_labels{{{SEL}}}", "", instant=True, fmt="table")],
             "^(cluster|node|ha_partner|model|version|healthy|partner_healthy)$",
-            "From the Harvest Rest config collector. An empty ha_partner column means the "
+            "From the Harvest config collector (Rest or Zapi). An empty ha_partner column means the "
             "pair-aware queries cannot resolve that node.",
         )
     )
@@ -937,6 +1021,7 @@ def build() -> dict:
             INDEX_THRESH,
             INDEX_MAP,
             "Green bands are safe windows for a planned takeover or an ONTAP upgrade. "
+            "Blue is Unknown: a required input was missing, so that interval was not scored. "
             "Ignores this dashboard's time picker and always shows 7 days. One row per node; "
             "the two nodes of a pair track identically, so read a pair from either row.",
         )
@@ -952,9 +1037,9 @@ def build() -> dict:
             [target(HA_COVERAGE, instant=True, fmt="table")],
             "percentunit",
             COVERAGE_THRESH,
-            "Fraction of nodes with an ha_partner label. Anything below 1 means the pair "
-            "scores above are incomplete: check that the Harvest Rest collector is enabled "
-            "and Harvest is 24.05 or newer.",
+            "Fraction of nodes with an ha_partner label. Anything below 1 means the takeover "
+            "light shows Unknown: check that a Harvest config collector (Rest or Zapi) is "
+            "enabled and Harvest is 24.05 or newer.",
             COVERAGE_MAP,
             text_mode="value_and_name",
             transformations=sorted_tiles("cluster"),
@@ -991,8 +1076,9 @@ def build() -> dict:
             8,
             [target(PCU_PAIR, "{{survivor}} survives")],
             "percent",
-            "Green below $PcuYellow, yellow to $PcuRed, red beyond. 200% is the survivor "
-            "sitting exactly at its latency knee.",
+            "PCU is performance capacity used: 100 × current utilization / optimal-point "
+            "utilization. Green below $PcuYellow, yellow to $PcuRed, red beyond. 200% is the "
+            "survivor sitting exactly at its latency knee.",
             PCU_THRESH,
         )
     )

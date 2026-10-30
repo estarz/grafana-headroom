@@ -55,9 +55,9 @@ Before trusting the traffic light, confirm the model has what it needs.
 
 | Panel | Expected | If not |
 | --- | --- | --- |
-| **HA partner coverage** | `1.0` — all nodes paired | Enable a Harvest config collector (`Rest` **or** `Zapi`), and confirm Harvest is 24.05 or newer. Below 1.0, the pair scores are incomplete. |
+| **HA partner coverage** | `1.0` — all nodes paired | Enable a Harvest config collector (`Rest` **or** `Zapi`), and confirm Harvest is 24.05 or newer. Below 1.0 the takeover light shows Unknown. |
 | **Ethernet ports in scope** | Your data ports, no cluster ports | Adjust `ExcludePorts`. Cluster ports appearing here means the `ipspace` filter did not work. |
-| **Headroom confidence (worst node)** | Any value — informational (blue), never an alarm | `0 unknown` or `1 seed` is normal and simply means the score uses `node_cpu_busy` instead of PCU. Not a fault. Read it to see which CPU tile is in play: the other is reference only, so its colour can disagree with the light. |
+| **Headroom confidence (worst node)** | Any value — informational (blue), never an alarm | `0 unknown` or `1 seed` is normal. One node below 2 switches the pair to `node_cpu_busy`, so the light can change color while the load does not. Not a fault, and not Unknown. The other CPU tile is reference only, so its colour can disagree with the light. |
 
 ## Regenerating
 

@@ -257,8 +257,8 @@ Grafana 8.3 up. Full explanation in
 
 - Run the metric verification query in Step 4.
 - Check the `ExcludePorts` variable — if it matches data ports, the network score goes blank.
-- Check the **HA partner coverage** panel. Below 1.0 means pair matching is incomplete and
-  the traffic light may underreport risk.
+- Check the **HA partner coverage** panel. Below 1.0 the takeover light shows Unknown
+  rather than a score from the nodes that did pair.
 
 **`HA partner coverage` shows less than 1.0**
 

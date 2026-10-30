@@ -10,6 +10,8 @@ three clusters and asserts exact expected values, which is what actually proves:
   * a low headroom confidence factor really does force the node_cpu_busy fallback
   * cluster-interconnect ports are excluded by ipspace
   * clusters with no net_port series still get scored via the name-regex fallback
+  * a missing network series or incomplete HA coverage scores Unknown (-1),
+    while a low confidence factor with both inputs present stays a real score
 
     python3 grafana/test_promql.py [path/to/promtool]
 
@@ -110,6 +112,11 @@ def build_input() -> list[dict]:
         inputs.append(series("headroom_cpu_optimal_point_utilization", {**base, "headroom": "cpu"}, 50))
         inputs.append(series("headroom_cpu_optimal_point_confidence_factor", {**base, "headroom": "cpu"}, 1))
         inputs.append(series("node_cpu_busy", base, busy))
+        # Light data ports, so the network index stays under the CPU index and the
+        # roll-up test still shows the hot pair winning. Both inputs are present,
+        # so low confidence must remain a real score rather than Unknown.
+        inputs.append(series("nic_util_percent", {**base, "nic": "e1a"}, 0.05))
+        inputs.append(series("net_port_status", {**base, "port": "e1a", "ipspace": "Default"}, 1))
 
     # ---- c3: 2-node cluster with no net_port series at all, exercising the
     # name-regex fallback. e0M is saturated and must stay out of the score.
@@ -120,6 +127,37 @@ def build_input() -> list[dict]:
         inputs.append(series("node_cpu_busy", base, 10))
         inputs.append(series("nic_util_percent", {**base, "nic": "e1a"}, 0.40))
         inputs.append(series("nic_util_percent", {**base, "nic": "e0M"}, 0.99))
+
+    # ---- c4: paired nodes with CPU busy and no Ethernet series at all.
+    # The old worst-of would score this from CPU alone and could read green.
+    for node, partner in (("n1", "n2"), ("n2", "n1")):
+        inputs.append(node_label_series("c4", node, partner, "AFF-A90"))
+    for node in ("n1", "n2"):
+        base = {"datacenter": "dc1", "cluster": "c4", "node": node}
+        inputs.append(series("node_cpu_busy", base, 10))
+
+    # ---- c5: both inputs present on the real pair, plus one node with an empty
+    # ha_partner. Coverage is 2/3, so the pair must not be allowed to look green.
+    for node, partner in (("n1", "n2"), ("n2", "n1")):
+        inputs.append(node_label_series("c5", node, partner, "AFF-A90"))
+    inputs.append(
+        series(
+            "node_labels",
+            {
+                "datacenter": "dc1",
+                "cluster": "c5",
+                "node": "n3",
+                "ha_partner": "",
+                "model": "AFF-A90",
+            },
+            1,
+        )
+    )
+    for node in ("n1", "n2"):
+        base = {"datacenter": "dc1", "cluster": "c5", "node": node}
+        inputs.append(series("node_cpu_busy", base, 10))
+        inputs.append(series("nic_util_percent", {**base, "nic": "e1a"}, 0.10))
+        inputs.append(series("net_port_status", {**base, "port": "e1a", "ipspace": "Default"}, 1))
 
     return inputs
 
@@ -161,6 +199,10 @@ def build_expectations() -> list[dict]:
                 sample(pair("c2", "n4", "n3"), busy_hot),
                 sample(pair("c3", "n1", "n2"), 20),
                 sample(pair("c3", "n2", "n1"), 20),
+                sample(pair("c4", "n1", "n2"), 20),
+                sample(pair("c4", "n2", "n1"), 20),
+                sample(pair("c5", "n1", "n2"), 20),
+                sample(pair("c5", "n2", "n1"), 20),
             ],
         },
         {
@@ -183,6 +225,12 @@ def build_expectations() -> list[dict]:
                 sample(pair("c1", "n2", "n1", nic="e1a"), nic_c1),
                 sample(pair("c3", "n1", "n2", nic="e1a"), 80),
                 sample(pair("c3", "n2", "n1", nic="e1a"), 80),
+                sample(pair("c2", "n1", "n2", nic="e1a"), 10),
+                sample(pair("c2", "n2", "n1", nic="e1a"), 10),
+                sample(pair("c2", "n3", "n4", nic="e1a"), 10),
+                sample(pair("c2", "n4", "n3", nic="e1a"), 10),
+                sample(pair("c5", "n1", "n2", nic="e1a"), 20),
+                sample(pair("c5", "n2", "n1", nic="e1a"), 20),
             ],
         },
         {
@@ -197,6 +245,10 @@ def build_expectations() -> list[dict]:
                 sample(pair("c2", "n4", "n3"), index_hot),
                 sample(pair("c3", "n1", "n2"), min(20 / 70, 1)),
                 sample(pair("c3", "n2", "n1"), min(20 / 70, 1)),
+                sample(pair("c4", "n1", "n2"), min(20 / 70, 1)),
+                sample(pair("c4", "n2", "n1"), min(20 / 70, 1)),
+                sample(pair("c5", "n1", "n2"), min(20 / 70, 1)),
+                sample(pair("c5", "n2", "n1"), min(20 / 70, 1)),
             ],
         },
         {
@@ -211,6 +263,10 @@ def build_expectations() -> list[dict]:
                 sample(pair("c2", "n4", "n3"), index_hot),
                 sample(pair("c3", "n1", "n2"), min(80 / 70, 1) + max((80 - 70) / 15, 0)),
                 sample(pair("c3", "n2", "n1"), min(80 / 70, 1) + max((80 - 70) / 15, 0)),
+                sample(pair("c4", "n1", "n2"), -1),
+                sample(pair("c4", "n2", "n1"), -1),
+                sample(pair("c5", "n1", "n2"), -1),
+                sample(pair("c5", "n2", "n1"), -1),
             ],
         },
         {
@@ -223,15 +279,19 @@ def build_expectations() -> list[dict]:
                     {"datacenter": "dc1", "cluster": "c3"},
                     min(80 / 70, 1) + max((80 - 70) / 15, 0),
                 ),
+                sample({"datacenter": "dc1", "cluster": "c4"}, -1),
+                sample({"datacenter": "dc1", "cluster": "c5"}, -1),
             ],
         },
         {
-            "name": "HA partner coverage is complete for all fixtures",
+            "name": "HA partner coverage is 1 except for the unpaired node in c5",
             "expr": gen.HA_COVERAGE,
             "exp_samples": [
                 sample({"datacenter": "dc1", "cluster": "c1"}, 1),
                 sample({"datacenter": "dc1", "cluster": "c2"}, 1),
                 sample({"datacenter": "dc1", "cluster": "c3"}, 1),
+                sample({"datacenter": "dc1", "cluster": "c4"}, 1),
+                sample({"datacenter": "dc1", "cluster": "c5"}, 2 / 3),
             ],
         },
     ]

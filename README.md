@@ -89,6 +89,7 @@ python3 grafana/test_promql.py /path/to/promtool
 | [docs/METRICS.md](docs/METRICS.md) | Verified metric reference and the PromQL patterns used |
 | [docs/REVIEW.md](docs/REVIEW.md) | Review of the first version: bugs found, corrections made |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Deferred ideas, and hard limits imposed by available metrics |
+| [docs/QA-ERICSSON.md](docs/QA-ERICSSON.md) | Session brief for the DC286 confidence and yellow-light questions |
 
 ## Scope
 
