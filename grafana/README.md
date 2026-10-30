@@ -49,15 +49,15 @@ confirm which form you have, the file should contain no bare-string datasource:
 grep -c '"datasource": "\${DS_PROMETHEUS}"' dashboards/cmode/ha_headroom.json   # must be 0
 ```
 
-## First run: check these three panels
+## First run: check the light
 
-Before trusting the traffic light, confirm the model has what it needs.
+Open the dashboard. The only decision on screen is **Can this cluster survive a node loss?** Green is go, yellow is wait, red is no, blue is Unknown. The band under it is the last 7 days. Everything else is folded into collapsed rows for someone explaining a colour.
 
 | Panel | Expected | If not |
 | --- | --- | --- |
-| **HA partner coverage** | `1.0` — all nodes paired | Enable a Harvest config collector (`Rest` **or** `Zapi`), and confirm Harvest is 24.05 or newer. Below 1.0 the takeover light shows Unknown. |
+| **Can this cluster survive a node loss?** | OK, Latency risk, or Service impact risk | Unknown means HA pairing or CPU or Ethernet data is missing. Expand **Why this colour** only after the light itself is unexplained. |
+| **HA partner coverage** | `1.0` — all nodes paired, inside the detail rows | Enable a Harvest config collector (`Rest` **or** `Zapi`), and confirm Harvest is 24.05 or newer. Below 1.0 the light shows Unknown. |
 | **Ethernet ports in scope** | Your data ports, no cluster ports | Adjust `ExcludePorts`. Cluster ports appearing here means the `ipspace` filter did not work. |
-| **Headroom confidence (worst node)** | Any value — informational (blue), never an alarm | `0 unknown` or `1 seed` is normal. One node below 2 switches the pair to `node_cpu_busy`, so the light can change color while the load does not. Not a fault, and not Unknown. The other CPU tile is reference only, so its colour can disagree with the light. |
 
 ## Regenerating
 

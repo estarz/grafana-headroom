@@ -434,9 +434,10 @@ score of 0.2053 equals combined CPU busy 14.37 ÷ `BusyYellow` 70 — the busy p
 path. The two paths produce visibly different numbers, so the `(PCU and confidence_ok) or
 busy` branch is doing real work rather than silently collapsing to one side.
 
-**The empty panels are both correct.** "Available CPU ops" is gated on confidence > 1, and
-`max_over_time(...[7d])` confirms confidence never left 1 all week. "iSCSI LIF latency" is
-empty because the lab has no iSCSI at all — zero `iscsi_lif_*` series exist.
+**Confidence at 1 for a week is normal after a reboot.** The decision view does not plot
+available CPU ops. That series used to be hidden whenever confidence was not above 1, so a
+node sitting on the seed looked like its capacity had disappeared, with a mark only on the
+moments confidence touched 2.
 
 ---
 

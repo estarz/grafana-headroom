@@ -57,8 +57,10 @@ port 0%. The light is yellow ("Latency risk") on both surviving-node tiles.
 The confidence chart does not match the sentence "node -02 dropped to 1 and
 stuck there":
 
-- `dc286-netapp01-01` reached 3 twice on 15 October, then sat at 1 for the rest
-  of the week (mean 1, last 1, max 3). This is the node on the seed.
+- `dc286-netapp01-01` reached 3 before the upgrade, fell to 1 on 16 October, and was
+  still at 1 more than a week later (mean 1, last 1, max 3). There was a brief touch of
+  2 on 21 October. That blip is not a recovery. Confidence has recovered when it stays
+  at 2 or 3.
 - `dc286-netapp01-02` never went above 2. It moves between 1 and 2 all week
   (mean 2, last 2, max 2). At 16 October 15:45 it was at 2 while `-01` was at 1.
 

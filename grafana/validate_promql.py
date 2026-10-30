@@ -48,8 +48,14 @@ def resolve(expr: str) -> str:
 def collect() -> list[tuple[str, str, str]]:
     """Return (panel title, refId, resolved expr) for every target."""
     dashboard = json.loads(DASHBOARD.read_text())
+
+    def walk(panels):
+        for panel in panels:
+            yield panel
+            yield from walk(panel.get("panels") or [])
+
     found = []
-    for panel in dashboard["panels"]:
+    for panel in walk(dashboard["panels"]):
         for tgt in panel.get("targets", []):
             expr = tgt.get("expr")
             if expr:

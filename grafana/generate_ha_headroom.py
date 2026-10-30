@@ -578,43 +578,16 @@ def row(pid: int, title: str, y: int, collapsed: bool = False, panels=None) -> d
     }
 
 
-NOTES = """**What this scores**
+NOTES = """**Before an upgrade or a planned takeover**
 
-Whether the **surviving node** could absorb its partner's load after a takeover — not
-whether a node is healthy today. Every score is per **HA pair**; the cluster value is
-the **worst pair**, because ONTAP moves a failed node's work to its partner only, never
-across the cluster.
+- 🟢 **OK** — go. A takeover should not cause a problem.
+- 🟡 **Latency risk** — wait. Do not take a node down at this load.
+- 🔴 **Service impact risk** — no. Expect unacceptable latency or a service impact.
+- 🔵 **Unknown** — no decision. A required input is missing.
 
-- 🟢 **OK** — takeover should not cause a problem
-- 🟡 **Latency risk** — avoid a planned failover at peak
-- 🔴 **Service impact risk** — expect unacceptable latency or loss
+The band under this panel is the same answer over the last 7 days. Green stretches are the windows.
 
-Inputs are the **95th percentile over $Window**, so a brief spike will not flip the light.
-CPU uses combined **performance capacity used** (current ÷ optimal point) when ONTAP's
-optimal-point confidence is ≥ $ConfMin on both nodes, otherwise the sum of `node_cpu_busy`.
-Network sums the same NIC or ifgrp on both nodes. Cluster-interconnect ports are excluded
-by **ipspace**, not by port name.
-
-**PCU** is performance capacity used: 100 × current utilization / optimal-point
-utilization. It is how full the node is relative to ONTAP's latency knee, not raw CPU percent.
-
-**Only one CPU tile drives the score at a time.** PCU is live only when headroom confidence
-is at least $ConfMin on **both** nodes. One node below that switches the whole pair to
-combined CPU busy, so the light can change color while the load does not. An upgrade or
-reboot sets that node back to the seed, and it stays there until that node's own load
-remeasures the knee. The other CPU tile is reference only, so its colour can disagree
-with the light. Confidence is informational — a low value is not a fault, and it is not
-Unknown.
-
-**Unknown** means the score was not evaluated. It appears when a node has no HA partner,
-or when the CPU-busy series or the Ethernet series is missing. A low confidence factor
-still produces a real score, on CPU busy.
-
-**Limits.** Summing CPU is a proxy — takeover adds HA overhead on top. Harvest has no NVRAM
-or HA-interconnect counter, so those are unmodelled. Harvest has no per-port iSCSI or
-NVMe-TCP utilization either, so that traffic is scored through its Ethernet ports.
-Aggregate and disk headroom are omitted deliberately (all-flash). This is not AIQUM's
-estimated ms/op after takeover."""
+This is an estimate from recent CPU and Ethernet load. It is not a guarantee, and it does not change because ONTAP is still relearning its latency knee after a reboot."""
 
 
 # Below 0 is the Unknown sentinel (-1). A real index starts at 0.
@@ -776,6 +749,69 @@ def custom_var(
     }
 
 
+def _walk_panels(panels: list[dict]):
+    for panel in panels:
+        yield panel
+        yield from _walk_panels(panel.get("panels") or [])
+
+
+def simplify_for_decision(panels: list[dict]) -> list[dict]:
+    """Keep a traffic light and the 7-day window on screen. Fold the rest away.
+
+    Confidence and the old available-CPU chart are the panels that made a week at
+    confidence 1 look like lost capacity. The ops chart is not generated at all.
+    The confidence chart stays in a collapsed row for someone explaining a colour.
+    """
+    order = [
+        "Takeover readiness",
+        "Can this cluster survive a node loss?",
+        "How to read this",
+        "Takeover risk over the last 7 days — pick a maintenance window",
+    ]
+    visible = [p for p in panels if p.get("title") in order]
+    rest = [p for p in panels if p.get("title") not in order]
+    visible.sort(key=lambda p: order.index(p["title"]))
+    visible[0]["gridPos"] = {"h": 1, "w": 24, "x": 0, "y": 0}
+    visible[1]["gridPos"] = {"h": 9, "w": 14, "x": 0, "y": 1}
+    visible[2]["gridPos"] = {"h": 9, "w": 10, "x": 14, "y": 1}
+    visible[3]["gridPos"] = {"h": 8, "w": 24, "x": 0, "y": 10}
+    visible[3]["title"] = "Last 7 days — green is a safe window for an upgrade"
+
+    sections: list[tuple[str, list[dict]]] = []
+    title = "Why this colour"
+    bucket: list[dict] = []
+    for panel in rest:
+        if panel.get("type") == "row":
+            if bucket:
+                sections.append((title, bucket))
+            title = panel["title"]
+            bucket = []
+        else:
+            bucket.append(panel)
+    if bucket:
+        sections.append((title, bucket))
+
+    used = {p["id"] for p in _walk_panels(panels)}
+    next_pid = max(used) + 1
+    y = 18
+    collapsed = []
+    for section_title, children in sections:
+        collapsed.append(
+            {
+                "collapsed": True,
+                "datasource": DS,
+                "gridPos": {"h": 1, "w": 24, "x": 0, "y": y},
+                "id": next_pid,
+                "panels": children,
+                "title": section_title,
+                "type": "row",
+            }
+        )
+        next_pid += 1
+        y += 1
+    return visible + collapsed
+
+
 def build() -> dict:
     panels: list[dict] = []
     pid = 1
@@ -802,14 +838,9 @@ def build() -> dict:
             [target(OVERALL_CLUSTER, instant=True, fmt="table")],
             "short",
             INDEX_THRESH,
-            "Worst HA pair in the cluster. Risk index: 1.0 is the yellow line, 2.0 the red "
-            "line. Worst of CPU and network, 95th percentile over $Window. The CPU input is "
-            "PCU when headroom confidence is at least $ConfMin on both nodes, and combined "
-            "node_cpu_busy otherwise. One node below $ConfMin switches the pair to CPU busy, "
-            "so the light can change color while the load does not. The other CPU tile is "
-            "reference only and its colour can disagree. Unknown means HA pairing is "
-            "incomplete, or the CPU-busy series or the network series is missing. A low "
-            "confidence factor is not Unknown: the score stays valid on CPU busy.",
+            "Go or no-go for taking a node down. Green is go, yellow is wait, red is no. "
+            "Unknown means a required input is missing, so there is no decision. "
+            "95th percentile over $Window.",
             INDEX_MAP,
             text_mode="value_and_name",
             transformations=sorted_tiles("cluster"),
@@ -1121,35 +1152,13 @@ def build() -> dict:
                 )
             ],
             "short",
-            "1 means ONTAP is using a seed value, not a measured curve — expected on lightly "
-            "loaded or recently rebooted nodes, and a reason the CPU busy fallback matters.",
+            "1 means ONTAP is using a seed value. After an upgrade this can stay at 1 for "
+            "weeks. A brief touch of 2 is not a recovery. This chart does not drive the "
+            "traffic light; open it only when the colour needs explaining.",
             decimals=0,
         )
     )
     y += 8
-
-    panels.append(
-        timeseries(
-            next_id(),
-            "Available CPU ops (optimal - current, confidence > 1 only)",
-            0,
-            y,
-            24,
-            6,
-            [
-                target(
-                    f"(\n  headroom_cpu_optimal_point_ops{{{SEL}}}\n"
-                    f"  - headroom_cpu_current_ops{{{SEL}}}\n)\n"
-                    f"and (headroom_cpu_optimal_point_confidence_factor{{{SEL}}} > 1)",
-                    "{{node}}",
-                )
-            ],
-            "iops",
-            "Gated on confidence > 1, matching stock Harvest behaviour. Negative means the "
-            "node is already running past its optimal-point ops.",
-        )
-    )
-    y += 6
 
     # --------------------------------------------------------------- CPU busy
     panels.append(row(next_id(), "CPU busy (fallback model, and sanity check)", y))
@@ -1428,6 +1437,8 @@ def build() -> dict:
         custom_var("ConfMin", ["1", "2", "3"], "2", "Min headroom confidence", hide=2),
     ]
 
+    panels = simplify_for_decision(panels)
+
     return {
         "__inputs": [
             {
@@ -1514,12 +1525,15 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     data = build()
     out.write_text(json.dumps(data, indent=1) + "\n")
-    longest = max(
-        (len(t["expr"]) for p in data["panels"] for t in p.get("targets", [])),
-        default=0,
-    )
+    queries = [
+        t["expr"]
+        for p in _walk_panels(data["panels"])
+        for t in p.get("targets", [])
+        if t.get("expr")
+    ]
+    longest = max((len(expr) for expr in queries), default=0)
     print(
-        f"wrote {out} ({len(data['panels'])} panels, "
+        f"wrote {out} ({len(list(_walk_panels(data['panels'])))} panels, "
         f"longest query {longest} chars, FC {'on' if INCLUDE_FC else 'off'})"
     )
 
