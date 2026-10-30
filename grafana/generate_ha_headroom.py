@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Generate grafana/dashboards/cmode/ha_headroom.json.
+"""Generate the HA Headroom dashboards.
 
-Produces a Harvest-style Grafana 8.3+ import file (schemaVersion 30) that scores
-ONTAP takeover risk per HA pair and rolls it up to the cluster as the worst pair.
+Writes two Harvest-style Grafana 8.3+ import files (schemaVersion 30) from the
+same queries:
+
+- dashboards/cmode/ha_headroom.json — the go/no-go light
+- dashboards/cmode/ha_headroom_debug.json — every chart behind that light
 
 See ../docs/METRICS.md for the PromQL shapes this emits and why.
 """
@@ -26,6 +29,9 @@ SEL = 'datacenter=~"$Datacenter",cluster=~"$Cluster"'
 # traffic in the model. Flip to True to add FC target-port panels and fold
 # fcp_util_percent into the network score.
 INCLUDE_FC = False
+
+UID_DECISION = "cdot-ha-headroom"
+UID_DEBUG = "cdot-ha-headroom-debug"
 
 # Aggregation granularities. A takeover is always within an HA pair, so the pair is
 # the unit of truth and the cluster is the worst of its pairs.
@@ -578,7 +584,7 @@ def row(pid: int, title: str, y: int, collapsed: bool = False, panels=None) -> d
     }
 
 
-NOTES = """**Before an upgrade or a planned takeover**
+NOTES_DECISION = """**Before an upgrade or a planned takeover**
 
 - 🟢 **OK** — go. A takeover should not cause a problem.
 - 🟡 **Latency risk** — wait. Do not take a node down at this load.
@@ -587,7 +593,64 @@ NOTES = """**Before an upgrade or a planned takeover**
 
 The band under this panel is the same answer over the last 7 days. Green stretches are the windows.
 
-This is an estimate from recent CPU and Ethernet load. It is not a guarantee, and it does not change because ONTAP is still relearning its latency knee after a reboot."""
+This is an estimate from recent CPU and Ethernet load. It is not a guarantee, and it does not change because ONTAP is still relearning its latency knee after a reboot. Open **HA Headroom Debug** for the charts behind the colour."""
+
+NOTES_DEBUG = """**What this scores**
+
+Whether the **surviving node** could absorb its partner's load after a takeover — not
+whether a node is healthy today. Every score is per **HA pair**; the cluster value is
+the **worst pair**, because ONTAP moves a failed node's work to its partner only, never
+across the cluster. This is the same score as **ONTAP: HA Headroom**.
+
+- 🟢 **OK** — takeover should not cause a problem
+- 🟡 **Latency risk** — avoid a planned failover at peak
+- 🔴 **Service impact risk** — expect unacceptable latency or loss
+
+Inputs are the **95th percentile over $Window**, so a brief spike will not flip the light.
+CPU uses combined **performance capacity used** (current ÷ optimal point) when ONTAP's
+optimal-point confidence is ≥ $ConfMin on both nodes, otherwise the sum of `node_cpu_busy`.
+Network sums the same NIC or ifgrp on both nodes. Cluster-interconnect ports are excluded
+by **ipspace**, not by port name.
+
+**PCU** is performance capacity used: 100 × current utilization / optimal-point
+utilization. It is how full the node is relative to ONTAP's latency knee, not raw CPU percent.
+
+**Only one CPU tile drives the score at a time.** PCU is live only when headroom confidence
+is at least $ConfMin on **both** nodes. One node below that switches the whole pair to
+combined CPU busy, so the light can change color while the load does not. An upgrade or
+reboot sets that node back to the seed, and it stays there until that node's own load
+remeasures the knee. The other CPU tile is reference only, so its colour can disagree
+with the light. Confidence is informational — a low value is not a fault, and it is not
+Unknown.
+
+**Unknown** means the score was not evaluated. It appears when a node has no HA partner,
+or when the CPU-busy series or the Ethernet series is missing. A low confidence factor
+still produces a real score, on CPU busy.
+
+**Available CPU ops** is blank while confidence is 1. That gap is the seed value, often
+for weeks after an upgrade. It is not lost capacity.
+
+**Limits.** Summing CPU is a proxy — takeover adds HA overhead on top. Harvest has no NVRAM
+or HA-interconnect counter, so those are unmodelled. Harvest has no per-port iSCSI or
+NVMe-TCP utilization either, so that traffic is scored through its Ethernet ports.
+Aggregate and disk headroom are omitted deliberately (all-flash). This is not AIQUM's
+estimated ms/op after takeover."""
+
+HEADLINE_DECISION = (
+    "Go or no-go for taking a node down. Green is go, yellow is wait, red is no. "
+    "Unknown means a required input is missing, so there is no decision. "
+    "95th percentile over $Window."
+)
+HEADLINE_DEBUG = (
+    "Worst HA pair in the cluster. Risk index: 1.0 is the yellow line, 2.0 the red "
+    "line. Worst of CPU and network, 95th percentile over $Window. The CPU input is "
+    "PCU when headroom confidence is at least $ConfMin on both nodes, and combined "
+    "node_cpu_busy otherwise. One node below $ConfMin switches the pair to CPU busy, "
+    "so the light can change color while the load does not. The other CPU tile is "
+    "reference only and its colour can disagree. Unknown means HA pairing is "
+    "incomplete, or the CPU-busy series or the network series is missing. A low "
+    "confidence factor is not Unknown: the score stays valid on CPU busy."
+)
 
 
 # Below 0 is the Unknown sentinel (-1). A real index starts at 0.
@@ -812,9 +875,11 @@ def simplify_for_decision(panels: list[dict]) -> list[dict]:
     return visible + collapsed
 
 
-def build() -> dict:
+def build(*, detailed: bool) -> dict:
     panels: list[dict] = []
     pid = 1
+    notes = NOTES_DEBUG if detailed else NOTES_DECISION
+    headline = HEADLINE_DEBUG if detailed else HEADLINE_DECISION
 
     def next_id() -> int:
         nonlocal pid
@@ -838,9 +903,7 @@ def build() -> dict:
             [target(OVERALL_CLUSTER, instant=True, fmt="table")],
             "short",
             INDEX_THRESH,
-            "Go or no-go for taking a node down. Green is go, yellow is wait, red is no. "
-            "Unknown means a required input is missing, so there is no decision. "
-            "95th percentile over $Window.",
+            headline,
             INDEX_MAP,
             text_mode="value_and_name",
             transformations=sorted_tiles("cluster"),
@@ -892,7 +955,7 @@ def build() -> dict:
             "datasource": DS,
             "gridPos": {"h": 8, "w": 8, "x": 16, "y": y},
             "id": next_id(),
-            "options": {"content": NOTES, "mode": "markdown"},
+            "options": {"content": notes, "mode": "markdown"},
             "title": "How to read this",
             "type": "text",
         }
@@ -1159,6 +1222,32 @@ def build() -> dict:
         )
     )
     y += 8
+
+    if detailed:
+        panels.append(
+            timeseries(
+                next_id(),
+                "Available CPU ops (optimal - current, confidence > 1 only)",
+                0,
+                y,
+                24,
+                6,
+                [
+                    target(
+                        f"(\n  headroom_cpu_optimal_point_ops{{{SEL}}}\n"
+                        f"  - headroom_cpu_current_ops{{{SEL}}}\n)\n"
+                        f"and (headroom_cpu_optimal_point_confidence_factor{{{SEL}}} > 1)",
+                        "{{node}}",
+                    )
+                ],
+                "iops",
+                "Ops left before the latency knee, and only while confidence is above 1. "
+                "A gap means ONTAP is on the seed value, which is normal for weeks after "
+                "an upgrade. It is not lost capacity. Negative means the node is already "
+                "past its optimal-point ops.",
+            )
+        )
+        y += 6
 
     # --------------------------------------------------------------- CPU busy
     panels.append(row(next_id(), "CPU busy (fallback model, and sanity check)", y))
@@ -1437,7 +1526,31 @@ def build() -> dict:
         custom_var("ConfMin", ["1", "2", "3"], "2", "Min headroom confidence", hide=2),
     ]
 
-    panels = simplify_for_decision(panels)
+    if not detailed:
+        panels = simplify_for_decision(panels)
+
+    title = "ONTAP: HA Headroom Debug" if detailed else "ONTAP: HA Headroom"
+    uid = UID_DEBUG if detailed else UID_DECISION
+    other_title = "HA Headroom" if detailed else "HA Headroom Debug"
+    other_uid = UID_DECISION if detailed else UID_DEBUG
+    other_tip = (
+        "Go/no-go light for an upgrade or takeover"
+        if detailed
+        else "Charts behind the colour"
+    )
+    description = (
+        "Charts behind the HA Headroom light: PCU, confidence, CPU busy, Ethernet "
+        "ports, and available CPU ops. Same score as ONTAP: HA Headroom."
+        if detailed
+        else (
+            "ONTAP takeover headroom per HA pair: can the survivor absorb its partner's "
+            "CPU and Ethernet load? Cluster score is the worst pair. All-flash scope, "
+            "so no aggregate or disk headroom."
+        )
+    )
+    tags = ["harvest", "ontap", "cdot", "ha", "headroom"]
+    if detailed:
+        tags.append("debug")
 
     return {
         "__inputs": [
@@ -1482,11 +1595,7 @@ def build() -> dict:
                 }
             ]
         },
-        "description": (
-            "ONTAP takeover headroom per HA pair: can the survivor absorb its partner's "
-            "CPU and Ethernet load? Cluster score is the worst pair. All-flash scope, "
-            "so no aggregate or disk headroom."
-        ),
+        "description": description,
         "editable": True,
         "gnetId": None,
         "graphTooltip": 1,
@@ -1503,27 +1612,36 @@ def build() -> dict:
                 "title": "Related Dashboards",
                 "type": "dashboards",
                 "url": "",
-            }
+            },
+            {
+                "icon": "dashboard",
+                "includeVars": True,
+                "keepTime": True,
+                "targetBlank": False,
+                "title": other_title,
+                "tooltip": other_tip,
+                "type": "link",
+                "url": f"/d/{other_uid}",
+            },
         ],
         "panels": panels,
         "refresh": "5m",
         "schemaVersion": 30,
         "style": "dark",
-        "tags": ["harvest", "ontap", "cdot", "ha", "headroom"],
+        "tags": tags,
         "templating": {"list": templating},
         "time": {"from": "now-6h", "to": "now"},
         "timepicker": {},
         "timezone": "",
-        "title": "ONTAP: HA Headroom",
-        "uid": "cdot-ha-headroom",
+        "title": title,
+        "uid": uid,
         "version": 1,
     }
 
 
-def main() -> None:
-    out = Path(__file__).resolve().parent / "dashboards" / "cmode" / "ha_headroom.json"
+def _write(name: str, data: dict) -> None:
+    out = Path(__file__).resolve().parent / "dashboards" / "cmode" / name
     out.parent.mkdir(parents=True, exist_ok=True)
-    data = build()
     out.write_text(json.dumps(data, indent=1) + "\n")
     queries = [
         t["expr"]
@@ -1536,6 +1654,11 @@ def main() -> None:
         f"wrote {out} ({len(list(_walk_panels(data['panels'])))} panels, "
         f"longest query {longest} chars, FC {'on' if INCLUDE_FC else 'off'})"
     )
+
+
+def main() -> None:
+    _write("ha_headroom.json", build(detailed=False))
+    _write("ha_headroom_debug.json", build(detailed=True))
 
 
 if __name__ == "__main__":

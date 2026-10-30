@@ -210,6 +210,10 @@ collector is running, or the Harvest version is too old.
 3. Select your Prometheus or VictoriaMetrics datasource.
 4. Click **Import**.
 
+The same steps import `grafana/dashboards/cmode/ha_headroom_debug.json` as
+**ONTAP: HA Headroom Debug**. That dashboard is the charts behind the light. A link
+at the top of each one opens the other.
+
 Alternatively, if you manage dashboards inside the Harvest tree:
 
 ```bash

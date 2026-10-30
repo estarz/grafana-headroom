@@ -59,7 +59,9 @@ If Harvest is already running, the short version:
 1. Confirm your poller has a config collector and a perf collector in `harvest.yml`. The
    shipped default gives you both, and either the REST or the ZAPI family works.
 2. Verify the key metrics are present — run the check query in [docs/INSTALL.md §4](docs/INSTALL.md#step-4--verify-the-metrics-are-present).
-3. Import `grafana/dashboards/cmode/ha_headroom.json` into Grafana.
+3. Import `grafana/dashboards/cmode/ha_headroom.json` into Grafana. For the charts
+   behind the light, also import `grafana/dashboards/cmode/ha_headroom_debug.json`.
+   Both are generated together.
 4. Open the dashboard and check the three first-run panels described in [grafana/README.md](grafana/README.md#first-run-check-these-three-panels).
 
 ```bash
@@ -79,7 +81,8 @@ python3 grafana/test_promql.py /path/to/promtool
 
 | Path | Role |
 | --- | --- |
-| [grafana/dashboards/cmode/ha_headroom.json](grafana/dashboards/cmode/ha_headroom.json) | The importable dashboard — generated, do not hand-edit |
+| [grafana/dashboards/cmode/ha_headroom.json](grafana/dashboards/cmode/ha_headroom.json) | The go/no-go dashboard — generated, do not hand-edit |
+| [grafana/dashboards/cmode/ha_headroom_debug.json](grafana/dashboards/cmode/ha_headroom_debug.json) | The same score with every chart open — generated, do not hand-edit |
 | [grafana/generate_ha_headroom.py](grafana/generate_ha_headroom.py) | Source of truth for every panel and query |
 | [grafana/validate_promql.py](grafana/validate_promql.py) | Offline PromQL parse check of the generated JSON |
 | [grafana/test_promql.py](grafana/test_promql.py) | Semantic tests: pair isolation, roll-up, confidence gate, port filtering |

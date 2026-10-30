@@ -13,6 +13,10 @@ ceiling. Active IQ Unified Manager's **Node Failover Planning** page is NetApp's
 productized version of the same idea. The CPU logic here follows AIQUM's; the network side
 is added because a saturated LAG is just as service-affecting as a saturated CPU.
 
+Two dashboards share this model. **ONTAP: HA Headroom** is the go/no-go light.
+**ONTAP: HA Headroom Debug** is the same score with every chart open. Both are generated
+from `grafana/generate_ha_headroom.py`, so a query change lands in both.
+
 ```mermaid
 flowchart LR
   ontap[ONTAP AFF cluster]

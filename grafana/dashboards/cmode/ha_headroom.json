@@ -88,6 +88,16 @@
    "title": "Related Dashboards",
    "type": "dashboards",
    "url": ""
+  },
+  {
+   "icon": "dashboard",
+   "includeVars": true,
+   "keepTime": true,
+   "targetBlank": false,
+   "title": "HA Headroom Debug",
+   "tooltip": "Charts behind the colour",
+   "type": "link",
+   "url": "/d/cdot-ha-headroom-debug"
   }
  ],
  "panels": [
@@ -269,7 +279,7 @@
    },
    "id": 5,
    "options": {
-    "content": "**Before an upgrade or a planned takeover**\n\n- \ud83d\udfe2 **OK** \u2014 go. A takeover should not cause a problem.\n- \ud83d\udfe1 **Latency risk** \u2014 wait. Do not take a node down at this load.\n- \ud83d\udd34 **Service impact risk** \u2014 no. Expect unacceptable latency or a service impact.\n- \ud83d\udd35 **Unknown** \u2014 no decision. A required input is missing.\n\nThe band under this panel is the same answer over the last 7 days. Green stretches are the windows.\n\nThis is an estimate from recent CPU and Ethernet load. It is not a guarantee, and it does not change because ONTAP is still relearning its latency knee after a reboot.",
+    "content": "**Before an upgrade or a planned takeover**\n\n- \ud83d\udfe2 **OK** \u2014 go. A takeover should not cause a problem.\n- \ud83d\udfe1 **Latency risk** \u2014 wait. Do not take a node down at this load.\n- \ud83d\udd34 **Service impact risk** \u2014 no. Expect unacceptable latency or a service impact.\n- \ud83d\udd35 **Unknown** \u2014 no decision. A required input is missing.\n\nThe band under this panel is the same answer over the last 7 days. Green stretches are the windows.\n\nThis is an estimate from recent CPU and Ethernet load. It is not a guarantee, and it does not change because ONTAP is still relearning its latency knee after a reboot. Open **HA Headroom Debug** for the charts behind the colour.",
     "mode": "markdown"
    },
    "title": "How to read this",

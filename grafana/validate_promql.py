@@ -36,7 +36,10 @@ SUBSTITUTIONS = {
     "$ConfMin": "2",
 }
 
-DASHBOARD = Path(__file__).resolve().parent / "dashboards" / "cmode" / "ha_headroom.json"
+DASHBOARDS = [
+    Path(__file__).resolve().parent / "dashboards" / "cmode" / "ha_headroom.json",
+    Path(__file__).resolve().parent / "dashboards" / "cmode" / "ha_headroom_debug.json",
+]
 
 
 def resolve(expr: str) -> str:
@@ -46,8 +49,7 @@ def resolve(expr: str) -> str:
 
 
 def collect() -> list[tuple[str, str, str]]:
-    """Return (panel title, refId, resolved expr) for every target."""
-    dashboard = json.loads(DASHBOARD.read_text())
+    """Return (panel title, refId, resolved expr) for every target in both dashboards."""
 
     def walk(panels):
         for panel in panels:
@@ -55,11 +57,21 @@ def collect() -> list[tuple[str, str, str]]:
             yield from walk(panel.get("panels") or [])
 
     found = []
-    for panel in walk(dashboard["panels"]):
-        for tgt in panel.get("targets", []):
-            expr = tgt.get("expr")
-            if expr:
-                found.append((panel.get("title", "?"), tgt.get("refId", "?"), resolve(expr)))
+    for path in DASHBOARDS:
+        if not path.is_file():
+            sys.exit(f"missing dashboard: {path}")
+        dashboard = json.loads(path.read_text())
+        for panel in walk(dashboard["panels"]):
+            for tgt in panel.get("targets", []):
+                expr = tgt.get("expr")
+                if expr:
+                    found.append(
+                        (
+                            f"{path.name}: {panel.get('title', '?')}",
+                            tgt.get("refId", "?"),
+                            resolve(expr),
+                        )
+                    )
     return found
 
 
@@ -79,7 +91,7 @@ def main() -> None:
     promtool = find_promtool()
     queries = collect()
     if not queries:
-        sys.exit(f"no queries found in {DASHBOARD}")
+        sys.exit(f"no queries found in {', '.join(str(p) for p in DASHBOARDS)}")
 
     rules = {
         "groups": [

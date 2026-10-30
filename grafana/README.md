@@ -10,6 +10,13 @@ for the queries see [../docs/METRICS.md](../docs/METRICS.md).
 2. Select your Prometheus or VictoriaMetrics datasource.
 3. Open **ONTAP: HA Headroom** and set **Datacenter** and **Cluster**.
 
+The same generator also writes
+[`dashboards/cmode/ha_headroom_debug.json`](dashboards/cmode/ha_headroom_debug.json),
+imported the same way. That is **ONTAP: HA Headroom Debug**: every chart behind the
+light, including available CPU ops. A link at the top of each dashboard opens the other
+and keeps the time range and variables. Both stay in step because one Python file
+emits both JSON files.
+
 Alternatively copy the JSON into your Harvest tree as
 `grafana/dashboards/cmode/ha_headroom.json` and import with `bin/harvest grafana import`.
 Custom files may need to sit beside Harvest's own dashboards for that to pick them up.
@@ -51,7 +58,7 @@ grep -c '"datasource": "\${DS_PROMETHEUS}"' dashboards/cmode/ha_headroom.json   
 
 ## First run: check the light
 
-Open the dashboard. The only decision on screen is **Can this cluster survive a node loss?** Green is go, yellow is wait, red is no, blue is Unknown. The band under it is the last 7 days. Everything else is folded into collapsed rows for someone explaining a colour.
+Open the dashboard. The only decision on screen is **Can this cluster survive a node loss?** Green is go, yellow is wait, red is no, blue is Unknown. The band under it is the last 7 days. Everything else is folded into collapsed rows for someone explaining a colour. **HA Headroom Debug**, linked from the top of the dashboard, is the same score with every chart open.
 
 | Panel | Expected | If not |
 | --- | --- | --- |
